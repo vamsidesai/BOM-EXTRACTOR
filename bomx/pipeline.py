@@ -90,6 +90,12 @@ def analyse_page(raw: RawPage, cfg: dict) -> PageAnalysis:
     else:
         clean = imaging.remove_lines(gray, grid)
         words = imaging.ocr_image(clean, dpi, cfg["ocr_lang"], psm=11, min_conf=cfg["min_word_conf"])
+        if raw.native_words:
+            n_boxes = [w.bbox for w in raw.native_words]
+            words = list(raw.native_words) + [
+                w for w in words
+                if not any(_box_overlap(w.bbox, nb) > 0.4 for nb in n_boxes)
+            ]
         free = assign_words(cells, words)
         if cfg.get("cell_ocr", True) and cells:
             groups0 = group_cells(cells, dpi)
@@ -369,8 +375,12 @@ def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
                 all_specs += found
         for r in [r for r in res.bom if r.page == page_no]:
             if r.material:
-                all_specs += find_specs(r.material, "bom", page_no, r.bbox, r.confidence,
-                                        categories={"material", "heat_treatment", "standard"})
+                found = find_specs(r.material, "bom", page_no, r.bbox, r.confidence,
+                                   categories={"material", "heat_treatment", "standard"})
+                if not found and len(r.material.strip()) >= 2:
+                    found = [SpecCallout("material", r.material.strip().upper(), r.material.strip(),
+                                         "bom", "custom", r.confidence, r.bbox, page_no)]
+                all_specs += found
             if r.extra.get("finish"):
                 all_specs += find_specs(r.extra["finish"], "bom", page_no, r.bbox, r.confidence,
                                         categories={"surface_finish", "heat_treatment"})
@@ -491,7 +501,12 @@ def build_summary(res: DrawingResult, cfg: dict) -> dict:
     if not res.bom:
         reasons.append("no BOM table found")
     confs = [f.confidence for f in tb.values()] + [r.confidence for r in res.bom]
+    struct_confs = [r.structural_confidence for r in res.bom]
     s["mean_confidence"] = round(sum(confs) / len(confs), 3) if confs else None
+    s["text_confidence"] = s["mean_confidence"]
+    s["structural_confidence"] = round(sum(struct_confs) / len(struct_confs), 3) if struct_confs else 1.0
+    if s["structural_confidence"] < lc:
+        reasons.append("low structural / column assignment confidence")
     s["review_required"] = bool(reasons)
     s["review_reasons"] = "; ".join(reasons) or None
     return s

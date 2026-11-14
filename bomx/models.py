@@ -119,7 +119,8 @@ class BomRow:
     extra: dict[str, str] = field(default_factory=dict)
     quantity_value: Optional[float] = None
     mass_kg: Optional[float] = None
-    confidence: float = 1.0
+    confidence: float = 1.0  # OCR / character recognition confidence
+    structural_confidence: float = 1.0  # layout / column assignment confidence
     bbox: Optional[BBox] = None
     page: int = 0
     flags: list[str] = field(default_factory=list)

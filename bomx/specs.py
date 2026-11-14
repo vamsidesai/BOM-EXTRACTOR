@@ -57,6 +57,8 @@ MATERIALS = [
        # EN 10025 suffixes: a 'U' inside J?R is an OCR insertion (S355JUR -> S355JR)
        lambda m: re.sub(r"JU([R0-2Z])", lambda x: "J" + x.group(1).replace("Z", "2"), _tidy(m.group(0))).replace(" ", "")),
     _p("material", "carbon_steel", r"\b(?:MILD\s+STEEL|M\.S\.|CRCA|HRPO|HRCA|C\.R\.C\.A\.)\b"),
+    _p("material", "structural_steel", r"\b(?:DIN\s*)?ST\s?-?(?:37|44|52)(?:[- ][1-3]|[- ]?[A-Z])?\b"),
+    _p("material", "superalloy", r"\b(?:INCONEL|HASTELLOY|MONEL|STELLITE|NIMONIC)\s*(?:[A-Z0-9\-]+)?\b|\b(?:C-?276|C-?22|INCO\s?\d{3})\b"),
     _p("material", "tool_steel", r"\b(?:TOOL\s+STEEL\s+)?(?:AISI\s*)?(D2|D3|H13|O1|A2|M2|S7|P20|OHNS|HCHCR)\b(?=\s*(?:TOOL|STEEL|$|[,;/]|HRC|HARDEN))"),
     _p("material", "cast_iron", r"\b(?:GREY\s+|GRAY\s+|SG\s+|DUCTILE\s+)?CAST\s+IRON\b|\bFG\s?\d{3}\b|\bSG\s?\d{3}(?:/\d+)?\b|\bGG\s?-?\d{2}\b|\bGGG\s?-?\d{2}\b|\bEN-GJ[LS]-\d{3}\b"),
     _p("material", "copper_alloy", r"\b(?:BRASS|BRONZE|PHOSPHOR\s+BRONZE|GUNMETAL|COPPER|BERYLLIUM\s+COPPER)\b(?:\s+(?:C\d{5}|CZ\d{3}|CuZn\d+\w*))?|\bC(?:1[01]|2[2-8]|36|51|54|63|93)\d{3}\b|\bCuZn\d+(?:Pb\d)?\b"),

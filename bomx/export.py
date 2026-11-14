@@ -41,6 +41,7 @@ def bom_records(res: DrawingResult) -> list[dict]:
         for k in extras:
             rec[k] = r.extra.get(k)
         rec["confidence"] = r.confidence
+        rec["structural_confidence"] = getattr(r, "structural_confidence", 1.0)
         rec["flags"] = ";".join(r.flags) or None
         out.append(rec)
     return out
@@ -208,7 +209,7 @@ def write_xlsx(results: Iterable[DrawingResult], path: Path, statuses: dict | No
     for r in results:
         extras += [c for c in r.bom_columns if c not in BOM_STD and c not in extras]
     bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value",
-                "material", "mass", "mass_kg", "remarks"] + extras + ["confidence", "flags", "page",
+                "material", "mass", "mass_kg", "remarks"] + extras + ["confidence", "structural_confidence", "flags", "page",
                                                                       "source_file"]
     _sheet(wb.create_sheet("BOM"), bom, bom_cols, flag_col="flags")
     _sheet(wb.create_sheet("Title Block"), [x for r in results for x in title_records(r)],

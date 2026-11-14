@@ -23,8 +23,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "low_conf_threshold": 0.65,
 
     # -------------------------------------------------- 2D CAD (DXF / DWG)
-    "cad_layouts": "auto",  # auto (paper-space sheets if any, else model space) | model | paper | all
-    "dwg_converter": "auto",  # auto | oda | libredwg | aspose  (auto tries them in that order)
+    "cad_layouts": "auto",  # auto (smart layout selection based on content & text) | model | paper | all
+    "dwg_converter": "auto",  # auto | oda | libredwg | aspose  (auto tries them in priority order)
     "oda_converter": None,  # path to ODAFileConverter(.exe) if not found automatically
     "libredwg_path": None,  # LibreDWG folder or path to dwgread(.exe) if not on PATH
     "cad_traced_dpi": 400,  # render resolution for traced (outline-only) CAD drawings

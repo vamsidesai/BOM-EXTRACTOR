@@ -29,6 +29,7 @@ class Column:
     x0: float
     x1: float
     unit: Optional[str] = None
+    inferred: bool = False
 
 
 @dataclass
@@ -37,6 +38,7 @@ class TableCellValue:
     conf: float
     bbox: tuple
     src: str = "cell"  # cell | split (row rule lost) | multi (column rule lost) | free (cell lost)
+    struct_conf: float = 1.0  # structural / column alignment confidence
 
 
 @dataclass
@@ -583,19 +585,22 @@ def _infer_columns(t: "Table", vocab) -> None:
             continue
         frac = lambda rx: sum(1 for v in vals if rx.match(v)) / len(vals)
         guess = None
-        if frac(_NUM_RX) >= 0.8 and any("." in v or "," in v for v in vals) and "mass" not in have:
+        if frac(_NUM_RX) >= 0.85 and any("." in v or "," in v for v in vals) and "mass" not in have:
             guess = "mass"
-        elif frac(_INT_RX) >= 0.8 and "quantity" not in have and "item" in have:
+        elif frac(_INT_RX) >= 0.85 and "quantity" not in have and "item" in have:
             guess = "quantity"
-        elif "material" not in have and sum(1 for v in vals if find_specs(v, "bom", categories={"material"})) / len(vals) >= 0.5:
+        elif "material" not in have and sum(1 for v in vals if find_specs(v, "bom", categories={"material"})) / len(vals) >= 0.6:
             guess = "material"
-        elif "part_number" not in have and frac(_PN_RX) >= 0.7:
+        elif "part_number" not in have and frac(_PN_RX) >= 0.75:
             guess = "part_number"
         if guess:
             for r in t.rows:
                 if col.key in r:
-                    r[guess] = r.pop(col.key)
+                    old_val = r.pop(col.key)
+                    old_val.struct_conf = min(old_val.struct_conf, 0.80)
+                    r[guess] = old_val
             col.key = guess
+            col.inferred = True
             if guess == "mass" and not col.unit:
                 m = re.search(r"\b(KG|G|LBS?)\b", col.header.upper())
                 col.unit = m.group(1) if m else None
@@ -636,21 +641,37 @@ def _band_to_values(band: list[Cell], cols: list[Column]) -> dict[str, TableCell
                     if k in vals and vals[k].text:
                         txt = vals[k].text + " " + txt
                     vals[k] = TableCellValue(txt.strip(), mean_conf(ws),
-                                             union_bbox([w.bbox for w in ws]), "multi")
+                                             union_bbox([w.bbox for w in ws]), "multi", struct_conf=0.85)
                 continue
-        best, best_ov = None, 0.0
+        best, best_score = None, 0.0
+        # Determine effective text center if words exist, else cell center
+        cx = np.median([w.cx for w in c.words]) if c.words else (c.x0 + c.x1) / 2.0
+        c_width = max(c.x1 - c.x0, 1e-3)
         for col in cols:
             ov = min(c.x1, col.x1) - max(c.x0, col.x0)
-            if ov > best_ov:
-                best, best_ov = col, ov
+            if ov <= 0:
+                continue
+            col_width = max(col.x1 - col.x0, 1e-3)
+            # Prioritize column that encloses the text center
+            center_bonus = col_width if (col.x0 <= cx <= col.x1) else 0.0
+            score = ov + center_bonus
+            if score > best_score:
+                best, best_score = col, score
         if best is None:
             continue
         txt = _cell_text(c.words) if c.words else c.text
         if best.key in vals and vals[best.key].text:
             txt = vals[best.key].text + " " + txt
+        ov = min(c.x1, best.x1) - max(c.x0, best.x0)
+        ov_frac = min(1.0, max(0.5, ov / c_width))
+        struct_conf = round(0.85 if c.parent >= 0 else ov_frac, 3)
+        if getattr(best, "inferred", False):
+            struct_conf = round(min(struct_conf, 0.80), 3)
         vals[best.key] = TableCellValue(txt.strip(), c.conf if c.words else 1.0, c.bbox,
-                                        "split" if c.parent >= 0 else "cell")
+                                        "split" if c.parent >= 0 else "cell", struct_conf=struct_conf)
     for col in cols:
+        vals.setdefault(col.key, TableCellValue("", 1.0, (col.x0, 0, col.x1, 0), struct_conf=1.0))
+    return vals
         vals.setdefault(col.key, TableCellValue("", 1.0, (col.x0, 0, col.x1, 0)))
     return vals
 
@@ -766,7 +787,8 @@ def _words_to_columns(ws, cols, bounds) -> dict[str, TableCellValue]:
         b = buckets[c.key]
         out[c.key] = TableCellValue(" ".join(w.text for w in sorted(b, key=lambda w: w.x0)),
                                     mean_conf(b) if b else 1.0,
-                                    union_bbox([w.bbox for w in b]) if b else (c.x0, 0, c.x1, 0))
+                                    union_bbox([w.bbox for w in b]) if b else (c.x0, 0, c.x1, 0),
+                                    src="text", struct_conf=0.85)
     return out
 
 

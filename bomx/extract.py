@@ -293,7 +293,24 @@ def _dist(a, b) -> float:
 # ======================================================================
 _QTY_RX = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(NOS?|PCS?|PC|EA|OFF|SETS?|M|MM|MTR|KG|L|LTR)?\.?\s*$", re.I)
 _AR_RX = re.compile(r"^\s*(A/?R|AS\s+REQ(?:UIRED|D)?|AS\s+REQUIRED|REF)\s*\.?$", re.I)
-_MASS_RX = re.compile(r"(\d+(?:[.,]\d+)?)\s*(KGS?|G|GMS?|GRAMS?|LBS?|T|TONNES?)?\b", re.I)
+_MASS_RX = re.compile(r"(\d+(?:[.,]\d+)?)\s*(KGS?|G|GMS?|GRAMS?|LBS?|POUNDS?|OZ|OUNCES?|T|TONNES?|MG)?\b", re.I)
+
+
+def _parse_num_str(s: str) -> Optional[float]:
+    s = s.strip()
+    if not s:
+        return None
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def ocr_digits(s: str) -> str:
@@ -305,19 +322,25 @@ def ocr_digits(s: str) -> str:
 def to_kg(text: str, default_unit: Optional[str] = None) -> Optional[float]:
     if not text:
         return None
-    m = _MASS_RX.search(text.replace(",", "."))
+    m = _MASS_RX.search(text)
     if not m:
         return None
-    v = float(m.group(1))
+    v = _parse_num_str(m.group(1))
+    if v is None:
+        return None
     u = (m.group(2) or default_unit or "KG").upper()
     if u.startswith("KG"):
         return v
     if u in ("G", "GM", "GMS", "GRAM", "GRAMS"):
-        return v / 1000
-    if u.startswith("LB"):
+        return v / 1000.0
+    if u.startswith("LB") or u.startswith("POUND"):
         return v * 0.45359237
+    if u.startswith("OZ") or u.startswith("OUNCE"):
+        return v * 0.0283495
+    if u == "MG":
+        return v / 1_000_000.0
     if u.startswith("T"):
-        return v * 1000
+        return v * 1000.0
     return v
 
 
@@ -330,10 +353,12 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
     for vals, bb in zip(t.rows, t.row_bboxes):
         r = BomRow(page=page, bbox=bb)
         confs = []
+        struct_confs = []
         for k, v in vals.items():
             txt = clean_value(v.text) or None
             if txt:
                 confs.append(v.conf)
+                struct_confs.append(getattr(v, "struct_conf", 1.0))
             if k in std:
                 setattr(r, k, txt)
             elif txt:
@@ -359,8 +384,8 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
                 r.quantity = ocr_digits(q)
                 m = _QTY_RX.match(r.quantity)
             if m:
-                r.quantity_value = float(m.group(1).replace(",", "."))
-                if r.quantity_value.is_integer():
+                r.quantity_value = _parse_num_str(m.group(1))
+                if r.quantity_value is not None and r.quantity_value.is_integer():
                     r.quantity_value = int(r.quantity_value)
             elif _AR_RX.match(q):
                 r.flags.append("quantity_as_required")
@@ -372,7 +397,10 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
             r.mass = re.sub(r"(?<=\d)\s*[:,]\s*(?=\d)", ".", r.mass)
             r.mass_kg = to_kg(r.mass, mass_unit)
             if r.mass_kg is None:
-                r.flags.append("mass_not_numeric")
+                if re.search(r"[A-Za-z]{2,}", r.mass):
+                    r.flags.append("unsupported_mass_unit")
+                else:
+                    r.flags.append("mass_not_numeric")
             elif not re.search(r"[A-Za-z]", r.mass) and not mass_unit:
                 r.flags.append("mass_unit_assumed_kg")
             if mass_is_total:
@@ -382,8 +410,11 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
         elif not r.part_number:
             r.flags.append("missing_part_number")
         r.confidence = round(min(confs) if confs else 0.0, 3)
+        r.structural_confidence = round(min(struct_confs) if struct_confs else 1.0, 3)
         if r.confidence < low_conf:
             r.flags.append("low_confidence")
+        if r.structural_confidence < low_conf:
+            r.flags.append("uncertain_column_assignment")
         rows.append(r)
 
     warnings = []
