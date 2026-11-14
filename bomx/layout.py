@@ -568,24 +568,61 @@ def _split_cell(c: Cell, y: float) -> tuple[Cell, Cell]:
 
 
 _NUM_RX = re.compile(r"^\d+(?:[.,]\d+)?$")
+_MASS_NUM_RX = re.compile(r"^\d+(?:[.,]\d+)?(?:\s*(?:kg|kgs?|g|gms?|grams?|lbs?|pounds?|oz|t))?$", re.I)
 _INT_RX = re.compile(r"^\d{1,4}$")
 _PN_RX = re.compile(r"^(?=.*\d)(?=.*[A-Z])[A-Z0-9][A-Z0-9\-_/.]{3,}$", re.I)
+_UNIT_HEADER_RX = re.compile(r"\b(KG|KGS|KILOGRAMS?|G|GM|GMS|GRAM|GRAMS|LB|LBS|POUND|POUNDS|OZ|TONNES?|T)\b", re.I)
+
+
+def _extract_column_unit(header: str) -> Optional[str]:
+    if not header:
+        return None
+    m = _UNIT_HEADER_RX.search(header)
+    if m:
+        u = m.group(1).upper()
+        if u in ("KG", "KGS", "KILOGRAM", "KILOGRAMS"):
+            return "KG"
+        if u in ("G", "GM", "GMS", "GRAM", "GRAMS"):
+            return "G"
+        if u in ("LB", "LBS", "POUND", "POUNDS"):
+            return "LB"
+        if u in ("OZ",):
+            return "OZ"
+        if u in ("T", "TONNE", "TONNES"):
+            return "T"
+        return u
+    return None
 
 
 def _infer_columns(t: "Table", vocab) -> None:
     """Give unrecognised BOM columns a canonical field from their content
-    (a misread header must not lose a whole column)."""
+    (a misread header must not lose a whole column), and ensure units are
+    correctly extracted for mass columns."""
     from .specs import find_specs
     have = {c.key for c in t.columns}
+
+    # Ensure any existing mass column has unit extracted from header if missing
+    for col in t.columns:
+        if col.key == "mass" and not col.unit:
+            col.unit = _extract_column_unit(col.header)
+
     for col in t.columns:
         if col.key in vocab:
             continue
         vals = [r[col.key].text.strip() for r in t.rows if r.get(col.key) and r[col.key].text.strip()]
         if len(vals) < 2:
             continue
-        frac = lambda rx: sum(1 for v in vals if rx.match(v)) / len(vals)
+        def frac(rx):
+            return sum(1 for v in vals if rx.match(v)) / len(vals)
         guess = None
-        if frac(_NUM_RX) >= 0.85 and any("." in v or "," in v for v in vals) and "mass" not in have:
+
+        head_upper = col.header.upper()
+        has_mass_header = bool(re.search(r"\b(MASS|WEIGHT|WT|GEWICHT|MASSE|POIDS|PESO)\b", head_upper))
+
+        if "mass" not in have and (
+            has_mass_header or
+            (frac(_MASS_NUM_RX) >= 0.80 and (any("." in v or "," in v for v in vals) or any(re.search(r"\b(?:kg|lbs?|gms?)\b", v, re.I) for v in vals)))
+        ):
             guess = "mass"
         elif frac(_INT_RX) >= 0.85 and "quantity" not in have and "item" in have:
             guess = "quantity"
@@ -602,8 +639,11 @@ def _infer_columns(t: "Table", vocab) -> None:
             col.key = guess
             col.inferred = True
             if guess == "mass" and not col.unit:
-                m = re.search(r"\b(KG|G|LBS?)\b", col.header.upper())
-                col.unit = m.group(1) if m else None
+                col.unit = _extract_column_unit(col.header)
+                if not col.unit:
+                    m_units = [re.search(r"\b(KG|G|LBS?)\b", v, re.I) for v in vals]
+                    if all(m_units) and len(set(m.group(1).upper() for m in m_units)) == 1:
+                        col.unit = m_units[0].group(1).upper()
             have.add(guess)
 
 

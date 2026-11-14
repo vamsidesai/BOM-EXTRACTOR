@@ -1,11 +1,18 @@
 """Tests for configuration validation and loading, including malformed YAML handling."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 import pytest
 import yaml
 
-from bomx.config import DEFAULT_CONFIG, load_config, validate_config
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tests"))
+
+from bomx.config import DEFAULT_CONFIG, load_config, validate_config  # noqa: E402
 
 
 def test_default_config_valid():

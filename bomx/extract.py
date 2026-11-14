@@ -8,7 +8,7 @@ from datetime import date
 from typing import Optional
 
 from .layout import Table
-from .models import BomRow, Cell, FieldValue, Measurement, RevisionRow, union_bbox
+from .models import BomRow, Cell, FieldValue, Measurement, RevisionRow
 from .textutil import clean_value, match_label_prefix
 
 # ======================================================================
@@ -540,8 +540,67 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
         else:
             r.flags.append("missing_quantity")
         if r.mass:
-            r.mass = re.sub(r"(?<=\d)\s*[:,]\s*(?=\d)", ".", r.mass)
-            mass_val, mass_meas, m_flags = parse_mass_measurement(r.mass, default_unit=mass_unit, conf=row_conf)
+            raw_mass = r.mass
+            mass_to_parse = raw_mass
+            is_suspicious = False
+            # Check for colon/semicolon/apostrophe separator confusion (e.g. '2:10')
+            if re.search(r"(?<=\d)\s*[:;']\s*(?=\d)", raw_mass):
+                is_suspicious = True
+            else:
+                m_num = re.search(r"(\d+(?:[.,]\d+)?)", raw_mass)
+                if m_num:
+                    ns = m_num.group(1)
+                    if "." not in ns and "," not in ns:
+                        try:
+                            nv = float(ns)
+                            u = (mass_unit or "").upper()
+                            # Suspicious integer mass in kg: e.g. 210 kg, 150 kg (often misread decimal like 2.10, 1.50)
+                            if (u.startswith("KG") or not u) and nv >= 10 and (ns.endswith("0") or len(ns) >= 3):
+                                is_suspicious = True
+                        except ValueError:
+                            pass
+
+            re_ocr_resolved = False
+            clean_img = getattr(t, "clean_image", None)
+            mass_cell = vals.get("mass")
+            if is_suspicious and clean_img is not None and mass_cell and getattr(mass_cell, "bbox", None):
+                try:
+                    from .imaging import ocr_numeric
+                    got = ocr_numeric(clean_img, mass_cell.bbox, dpi=getattr(t, "dpi", 300.0), lang=getattr(t, "lang", "eng"))
+                    if got and got[0]:
+                        num_txt, num_conf = got
+                        # Compare both OCR results:
+                        # If targeted numeric pass found a decimal point (e.g. '2.10')
+                        if "." in num_txt or "," in num_txt:
+                            norm_num = num_txt.replace(",", ".")
+                            m_u = re.search(r"([A-Za-z]+)", raw_mass)
+                            u_str = f" {m_u.group(1)}" if m_u else ""
+                            mass_to_parse = f"{norm_num}{u_str}"
+                            re_ocr_resolved = True
+                            if num_conf < 0.85:
+                                r.flags.append("mass_decimal_ambiguous")
+                        elif num_txt == re.sub(r"[^\d]", "", raw_mass):
+                            # Both OCR passes confirmed integer digits (e.g. '210')
+                            if float(num_txt) >= 20:
+                                r.flags.append("mass_decimal_ambiguous")
+                            re_ocr_resolved = True
+                except Exception:
+                    pass
+
+            if is_suspicious and not re_ocr_resolved:
+                # If separator had colon or apostrophe, parse candidate with dot but flag as ambiguous
+                if re.search(r"(?<=\d)\s*[:;']\s*(?=\d)", mass_to_parse):
+                    mass_to_parse = re.sub(r"(?<=\d)\s*[:;']\s*(?=\d)", ".", mass_to_parse)
+                    r.flags.append("mass_decimal_ambiguous")
+                else:
+                    # Integer mass that is suspicious (e.g. 210 kg) without decimal
+                    r.flags.append("mass_decimal_ambiguous")
+
+            mass_val, mass_meas, m_flags = parse_mass_measurement(mass_to_parse, default_unit=mass_unit, conf=row_conf)
+            # Crucial: preserve original OCR text in r.mass and mass_meas.raw!
+            r.mass = raw_mass
+            if mass_meas:
+                mass_meas.raw = raw_mass
             r.mass_kg = mass_val
             r.mass_measurement = mass_meas
             r.flags.extend(m_flags)

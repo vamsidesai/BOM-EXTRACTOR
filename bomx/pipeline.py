@@ -17,7 +17,7 @@ from .ingest import RawPage, iter_pages
 from .layout import (Table, assign_words, complete_rows, detect_cells, find_grid_tables, find_notes,
                      find_text_tables, group_cells, split_numbered_notes, text_title_cells,
                      title_block_cells)
-from .models import (BomRow, Dimension, DrawingResult, FieldValue, PageResult, Region, SpecCallout, TextLine,
+from .models import (Dimension, DrawingResult, FieldValue, PageResult, Region, SpecCallout, TextLine,
                      Word, mean_conf, union_bbox)
 from .specs import find_specs, summarise
 from .textutil import fix_ocr_confusions, group_lines, split_segments
@@ -131,7 +131,6 @@ def analyse_page(raw: RawPage, cfg: dict) -> PageAnalysis:
         if bom_tables:  # the text table may have been swallowed by a title-block group
             tb_cells = [c for c in tb_cells
                         if not any(_box_overlap(c.bbox, t.bbox) > 0.5 for t in bom_tables)]
-            tb_ids = {c.id for c in tb_cells}
     if not rev_tables:
         tb_box = [c.bbox for c in tb_cells]
         pool = outside([t.bbox for t in bom_tables] + tb_box)
@@ -154,6 +153,11 @@ def analyse_page(raw: RawPage, cfg: dict) -> PageAnalysis:
         if not native and cfg.get("cell_ocr", True):
             _reread_reconstructed(t, clean, dpi, cfg)
     pa.bom_tables, pa.rev_tables, pa.tb_cells = bom_tables, rev_tables, tb_cells
+    if not native and clean is not None:
+        for t in bom_tables:
+            t.clean_image = clean
+            t.dpi = dpi
+            t.lang = cfg.get("ocr_lang", "eng")
 
     if not native:  # digit-constrained re-read of numeric columns that don't look numeric or have low confidence
         for t in bom_tables:
