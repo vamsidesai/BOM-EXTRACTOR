@@ -10,13 +10,14 @@ from typing import Optional
 import numpy as np
 
 from . import imaging
+from .dimensions import dedupe_dimensions, extract_dimensions_from_words
 from .extract import (latest_revision, normalise_title_fields, parse_title_block, table_to_bom,
                       table_to_revisions)
 from .ingest import RawPage, iter_pages
 from .layout import (Table, assign_words, complete_rows, detect_cells, find_grid_tables, find_notes,
                      find_text_tables, group_cells, split_numbered_notes, text_title_cells,
                      title_block_cells)
-from .models import (BomRow, DrawingResult, FieldValue, PageResult, Region, SpecCallout, TextLine,
+from .models import (BomRow, Dimension, DrawingResult, FieldValue, PageResult, Region, SpecCallout, TextLine,
                      Word, mean_conf, union_bbox)
 from .specs import find_specs, summarise
 from .textutil import fix_ocr_confusions, group_lines, split_segments
@@ -313,6 +314,7 @@ def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
     res = DrawingResult(source_file=str(path))
     title: dict[str, FieldValue] = {}
     all_specs: list[SpecCallout] = []
+    all_dims: list[Dimension] = []
     bom_cols: list[str] = []
 
     for raw in iter_pages(path, cfg["dpi"], cfg["max_pixels"], force_ocr, cfg["native_min_words"], cfg):
@@ -379,6 +381,9 @@ def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
                 all_specs += find_specs(seg.text, "page_text", page_no, seg.bbox, seg.conf,
                                         categories={"material", "surface_finish", "heat_treatment"})
 
+        # ---------------- dimensions
+        all_dims += extract_dimensions_from_words(pa.words, page_no)
+
         if overlay_dir is not None:
             from .overlay import render_page
             overlay_dir.mkdir(parents=True, exist_ok=True)
@@ -391,6 +396,7 @@ def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
     res.title_block = title
     res.bom_columns = bom_cols
     res.specs = _dedupe_specs(all_specs)
+    res.dimensions = dedupe_dimensions(all_dims)
     latest = latest_revision(res.revisions)
     if "revision" not in title and latest:
         title["revision"] = FieldValue(latest.rev, latest.confidence, latest.bbox,

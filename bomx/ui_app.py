@@ -287,7 +287,14 @@ if run:
     for up in uploads or []:
         d = wd / "uploads"
         d.mkdir(parents=True, exist_ok=True)
-        p = d / up.name
+        target_name = Path(up.name).name
+        stem = Path(target_name).stem
+        ext = Path(target_name).suffix
+        p = d / target_name
+        counter = 1
+        while p.exists() or p in inputs:
+            p = d / f"{stem}_{counter}{ext}"
+            counter += 1
         p.write_bytes(up.getbuffer())
         inputs.append(p)
     if folder.strip():

@@ -9,7 +9,10 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Optional
 
-from .models import BBox, Word
+from .models import BBox, Dimension, Word
+
+# DimensionCallout is an alias for Dimension model
+DimensionCallout = Dimension
 
 # Common engineering dimension symbols
 _SYM_MAP = {
@@ -50,23 +53,6 @@ _CHAMFER_RX = re.compile(
 _ANGLE_RX = re.compile(
     r"\b(?P<ang>\d+(?:\.\d+)?)\s*°(?:\s*(?P<min>\d+)['′])?\b"
 )
-
-
-@dataclass
-class DimensionCallout:
-    text: str
-    nominal: Optional[float] = None
-    tolerance: Optional[str] = None
-    prefix: Optional[str] = None
-    suffix: Optional[str] = None
-    dim_type: str = "linear"  # linear | diameter | radius | thread | chamfer | angle
-    raw: Optional[str] = None
-    bbox: Optional[BBox] = None
-    page: int = 0
-    confidence: float = 1.0
-
-    def to_dict(self) -> dict:
-        return {k: v for k, v in asdict(self).items()}
 
 
 def normalize_dim_symbols(text: str) -> str:

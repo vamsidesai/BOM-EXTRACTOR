@@ -162,6 +162,9 @@ class Dimension:
     page: int = 0
     confidence: float = 1.0
 
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items()}
+
 
 @dataclass
 class PageResult:

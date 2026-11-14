@@ -23,7 +23,8 @@ IMAGE_EXT = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 CAD_EXT = {".dxf", ".dwg"}
 SUPPORTED_EXT = PDF_EXT | IMAGE_EXT | CAD_EXT
 
-Image.MAX_IMAGE_PIXELS = None  # engineering sheets are legitimately huge
+# Decompression bomb protection: cap at 100MP to accommodate large A0/E-size sheets safely
+Image.MAX_IMAGE_PIXELS = 100_000_000
 
 
 def sniff_format(path: str | Path) -> str:
@@ -241,8 +242,20 @@ def _iter_image(path, dpi, max_pixels):
             notes: list[str] = []
             info_dpi = frame.info.get("dpi")
             src_dpi = float(info_dpi[0]) if info_dpi and info_dpi[0] and info_dpi[0] > 30 else None
+            w, h = frame.size
+            downscaled = False
+            if max_pixels and (w * h > max_pixels):
+                scale = (max_pixels / (w * h)) ** 0.5
+                target_w = max(1, int(w * scale))
+                target_h = max(1, int(h * scale))
+                resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.ANTIALIAS if hasattr(Image, "ANTIALIAS") else None)
+                frame = frame.resize((target_w, target_h), resample=resample) if resample else frame.resize((target_w, target_h))
+                if src_dpi:
+                    src_dpi *= scale
+                downscaled = True
+                notes.append("image downscaled prior to decode to respect max_pixels")
             rgb = np.asarray(frame.convert("RGB"))
-            arr, eff = _normalise_raster(rgb, src_dpi, dpi, max_pixels, notes)
+            arr, eff = _normalise_raster(rgb, src_dpi, dpi, max_pixels, notes, already_capped=downscaled)
             yield RawPage(i, arr, eff, None, notes, kind="image")
 
 
@@ -265,7 +278,7 @@ def _normalise_raster(rgb: np.ndarray, src_dpi: Optional[float], dpi: int, max_p
             src_dpi = float(dpi)
             notes.append(f"image has no DPI metadata - assuming {dpi}")
     h, w = rgb.shape[:2]
-    if w * h > max_pixels:
+    if not already_capped and max_pixels and w * h > max_pixels:
         s = (max_pixels / (w * h)) ** 0.5
         rgb = cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
         src_dpi *= s

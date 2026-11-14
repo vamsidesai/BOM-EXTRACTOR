@@ -71,6 +71,13 @@ def note_records(res: DrawingResult) -> list[dict]:
              "confidence": n["confidence"]} for n in res.notes]
 
 
+def dimension_records(res: DrawingResult) -> list[dict]:
+    return [{"drawing_number": _dn(res), "page": d.page, "type": d.dim_type,
+             "text": d.text, "nominal": d.nominal, "tolerance": d.tolerance,
+             "prefix": d.prefix, "suffix": d.suffix, "raw": d.raw,
+             "confidence": round(d.confidence, 3)} for d in res.dimensions]
+
+
 # Target attribute list (SOW section 3): (category, field name, description, getter)
 ATTRIBUTES = [
     ("Title Block", "Drawing Number", "Unique identification number of drawing", "drawing_number"),
@@ -120,8 +127,8 @@ def _attr_sheet(ws, drawings: list[tuple[dict, list[dict]]]) -> None:
     band = PatternFill("solid", fgColor="F2F2F2")
     for summary, bom in drawings:
         for i, rec in enumerate(attribute_records(summary, bom)):
-            row = ([summary.get("drawing_number") or summary.get("file")] if multi else []) + \
-                  [rec[c] for c in ATTR_COLS]
+            row = ([_cell(summary.get("drawing_number") or summary.get("file"))] if multi else []) + \
+                  [_cell(rec[c]) for c in ATTR_COLS]
             ws.append(row)
             r = ws.max_row
             for j in range(1, len(row) + 1):
@@ -151,20 +158,32 @@ def write_json(res: DrawingResult, path: Path) -> None:
     path.write_text(json.dumps(res.to_dict(), indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_formula(v):
+    if isinstance(v, str) and v and v[0] in _FORMULA_PREFIXES:
+        return f"'{v}"
+    return v
+
+
 def write_csv(records: list[dict], path: Path, columns: list[str] | None = None) -> None:
     cols = columns or _columns(records)
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:  # BOM-prefixed for Excel
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for r in records:
-            w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in cols})
+            w.writerow({k: ("" if r.get(k) is None else _sanitize_formula(r.get(k))) for k in cols})
 
 
 def write_csvs(res: DrawingResult, out_dir: Path, stem: str) -> list[Path]:
     files = []
-    for name, recs in (("bom", bom_records(res)), ("title_block", title_records(res)),
-                       ("specs", spec_records(res)), ("revisions", revision_records(res)),
-                       ("notes", note_records(res))):
+    groups = [("bom", bom_records(res)), ("title_block", title_records(res)),
+              ("specs", spec_records(res)), ("revisions", revision_records(res)),
+              ("notes", note_records(res))]
+    if res.dimensions:
+        groups.append(("dimensions", dimension_records(res)))
+    for name, recs in groups:
         p = out_dir / f"{stem}_{name}.csv"
         write_csv(recs, p, _default_cols(name, recs))
         files.append(p)
@@ -200,6 +219,9 @@ def write_xlsx(results: Iterable[DrawingResult], path: Path, statuses: dict | No
            ["drawing_number", "rev", "description", "date", "date_iso", "approved", "page", "confidence"])
     _sheet(wb.create_sheet("Notes"), [x for r in results for x in note_records(r)],
            ["drawing_number", "page", "number", "text", "confidence"])
+    if any(r.dimensions for r in results):
+        _sheet(wb.create_sheet("Dimensions"), [x for r in results for x in dimension_records(r)],
+               ["drawing_number", "page", "type", "text", "nominal", "tolerance", "prefix", "suffix", "confidence"])
     warn = [{"source_file": Path(r.source_file).name, "warning": w} for r in results for w in r.warnings]
     _sheet(wb.create_sheet("Warnings"), warn, ["source_file", "warning"])
     wb.save(path)
@@ -249,7 +271,7 @@ def _sheet(ws, records, cols, flag_col=None, low_conf=0.65):
 def _cell(v):
     if isinstance(v, (list, dict)):
         return json.dumps(v)
-    return v
+    return _sanitize_formula(v)
 
 
 def _columns(records):
