@@ -1,0 +1,2 @@
+"""BOMX FastAPI Backend Application."""
+

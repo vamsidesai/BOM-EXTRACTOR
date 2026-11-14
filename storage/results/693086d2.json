@@ -1,0 +1,960 @@
+{
+  "source_file": "C:\\Users\\Asm50079\\Documents\\GitHub\\BOM-EXTRACTOR\\storage\\uploads\\693086d2\\legacy_drawing_4.pdf",
+  "summary": {
+    "file": "legacy_drawing_4.pdf",
+    "pages": 1,
+    "input_type": "ocr",
+    "file_format": "PDF",
+    "page_kinds": "pdf-scan",
+    "drawing_number": "DWG-2026-8893-R2",
+    "drawing_title": "GEARBOX CASING ASSEMBLY",
+    "revision": "A",
+    "drawn_by": "J. DOE",
+    "date": "2024-08-15",
+    "scale": "1:1",
+    "projection": null,
+    "sheet": "1 OF 1",
+    "author_date": "J. DOE / 2024-08-15",
+    "material_callout": "REFER TO BOM FOR MATERIALS",
+    "surface_finish": "MACHINED SEATS / Ra 1.6 um, UNMACHINED CAST / Ra 6.3 um",
+    "heat_treatment": "STRESS RELIEVE CASTINGS BEFORE FINAL MACHINING",
+    "standards": "ASTM A48",
+    "bom_items": 6,
+    "bom_total_quantity": 18,
+    "revisions": 0,
+    "notes": 5,
+    "text_confidence": 0.828,
+    "structural_confidence": 0.991,
+    "mean_confidence": 0.855,
+    "min_structural_confidence": 0.987,
+    "min_text_confidence": 0.33,
+    "review_required": false,
+    "review_reasons": null
+  },
+  "title_block": {
+    "drawing_title": {
+      "value": "GEARBOX CASING ASSEMBLY",
+      "confidence": 0.914,
+      "bbox": [
+        1677.0,
+        1384.0,
+        2345.0,
+        1486.0
+      ],
+      "raw": "GEARBOX CASING ASSEMBLY",
+      "normalized": null
+    },
+    "revision": {
+      "value": "A",
+      "confidence": 0.904,
+      "bbox": [
+        2247.0,
+        1490.0,
+        2345.0,
+        1577.0
+      ],
+      "raw": "A",
+      "normalized": "A"
+    },
+    "drawing_number": {
+      "value": "DWG-2026-8893-R2",
+      "confidence": 0.9,
+      "bbox": [
+        1678.0,
+        1491.0,
+        2242.0,
+        1577.0
+      ],
+      "raw": "DWG-2026-8893-R2",
+      "normalized": "DWG-2026-8893-R2"
+    },
+    "drawn_by": {
+      "value": "J. DOE",
+      "confidence": 0.901,
+      "bbox": [
+        1677.0,
+        1581.0,
+        1995.0,
+        1643.0
+      ],
+      "raw": "J. DOE / 2024-08-15",
+      "normalized": null
+    },
+    "scale": {
+      "value": "1:1",
+      "confidence": 0.907,
+      "bbox": [
+        1999.0,
+        1581.0,
+        2160.0,
+        1643.0
+      ],
+      "raw": "1:1",
+      "normalized": "1:1"
+    },
+    "sheet": {
+      "value": "1 OF 1",
+      "confidence": 0.921,
+      "bbox": [
+        2165.0,
+        1581.0,
+        2345.0,
+        1642.0
+      ],
+      "raw": "1 OF 1",
+      "normalized": null
+    },
+    "drawn_date": {
+      "value": "2024-08-15",
+      "confidence": 0.901,
+      "bbox": [
+        1677.0,
+        1581.0,
+        1995.0,
+        1643.0
+      ],
+      "raw": "J. DOE / 2024-08-15",
+      "normalized": "2024-08-15"
+    },
+    "date": {
+      "value": "2024-08-15",
+      "confidence": 0.901,
+      "bbox": [
+        1677.0,
+        1581.0,
+        1995.0,
+        1643.0
+      ],
+      "raw": "J. DOE / 2024-08-15",
+      "normalized": "2024-08-15"
+    }
+  },
+  "bom_columns": [
+    "item",
+    "part_number",
+    "description",
+    "quantity",
+    "material",
+    "mass"
+  ],
+  "bom": [
+    {
+      "item": "01",
+      "part_number": "PN-5511-A",
+      "description": "LOWER CASING",
+      "quantity": "1",
+      "material": "Cast Iron ASTM A48",
+      "mass": "12.40 kg",
+      "remarks": null,
+      "extra": {},
+      "quantity_value": 1,
+      "mass_kg": 12.4,
+      "confidence": 0.87,
+      "structural_confidence": 1.0,
+      "bbox": [
+        1339.0,
+        60.0,
+        2344.0,
+        104.0
+      ],
+      "page": 1,
+      "flags": [],
+      "quantity_measurement": {
+        "raw": "1",
+        "nominal": 1.0,
+        "unit": null,
+        "canonical_value": 1.0,
+        "canonical_unit": "count",
+        "measurement_type": "quantity",
+        "tolerance": null,
+        "confidence": 0.87
+      },
+      "mass_measurement": {
+        "raw": "12.40 kg",
+        "nominal": 12.4,
+        "unit": "kg",
+        "canonical_value": 12.4,
+        "canonical_unit": "kg",
+        "measurement_type": "mass",
+        "tolerance": null,
+        "confidence": 0.87
+      },
+      "mass_verified": true,
+      "mass_candidate": null
+    },
+    {
+      "item": "02",
+      "part_number": "PN-5511-B",
+      "description": "UPPER CASING",
+      "quantity": "1",
+      "material": "Cast iron ASTM A48",
+      "mass": "9.80 kg",
+      "remarks": null,
+      "extra": {},
+      "quantity_value": 1,
+      "mass_kg": 9.8,
+      "confidence": 0.885,
+      "structural_confidence": 1.0,
+      "bbox": [
+        1339.0,
+        108.0,
+        2344.0,
+        151.0
+      ],
+      "page": 1,
+      "flags": [],
+      "quantity_measurement": {
+        "raw": "1",
+        "nominal": 1.0,
+        "unit": null,
+        "canonical_value": 1.0,
+        "canonical_unit": "count",
+        "measurement_type": "quantity",
+        "tolerance": null,
+        "confidence": 0.885
+      },
+      "mass_measurement": {
+        "raw": "9.80 kg",
+        "nominal": 9.8,
+        "unit": "kg",
+        "canonical_value": 9.8,
+        "canonical_unit": "kg",
+        "measurement_type": "mass",
+        "tolerance": null,
+        "confidence": 0.885
+      },
+      "mass_verified": true,
+      "mass_candidate": null
+    },
+    {
+      "item": "03",
+      "part_number": "PN-5511-C",
+      "description": "CASING GASKET",
+      "quantity": "1",
+      "material": "Nitrile/Cork",
+      "mass": "0.05 kg",
+      "remarks": null,
+      "extra": {},
+      "quantity_value": 1,
+      "mass_kg": 0.05,
+      "confidence": 0.87,
+      "structural_confidence": 0.987,
+      "bbox": [
+        1338.0,
+        156.0,
+        2344.0,
+        200.0
+      ],
+      "page": 1,
+      "flags": [],
+      "quantity_measurement": {
+        "raw": "1",
+        "nominal": 1.0,
+        "unit": null,
+        "canonical_value": 1.0,
+        "canonical_unit": "count",
+        "measurement_type": "quantity",
+        "tolerance": null,
+        "confidence": 0.87
+      },
+      "mass_measurement": {
+        "raw": "0.05 kg",
+        "nominal": 0.05,
+        "unit": "kg",
+        "canonical_value": 0.05,
+        "canonical_unit": "kg",
+        "measurement_type": "mass",
+        "tolerance": null,
+        "confidence": 0.87
+      },
+      "mass_verified": true,
+      "mass_candidate": null
+    },
+    {
+      "item": "04",
+      "part_number": "PN-5511-D",
+      "description": "HEX HEAD BOLT M10x45",
+      "quantity": "12",
+      "material": "Carbon Steel Gr 8.8",
+      "mass": "0.05 kg",
+      "remarks": null,
+      "extra": {},
+      "quantity_value": 12,
+      "mass_kg": 0.05,
+      "confidence": 0.88,
+      "structural_confidence": 0.987,
+      "bbox": [
+        1338.0,
+        204.0,
+        2344.0,
+        247.0
+      ],
+      "page": 1,
+      "flags": [],
+      "quantity_measurement": {
+        "raw": "12",
+        "nominal": 12.0,
+        "unit": null,
+        "canonical_value": 12.0,
+        "canonical_unit": "count",
+        "measurement_type": "quantity",
+        "tolerance": null,
+        "confidence": 0.88
+      },
+      "mass_measurement": {
+        "raw": "0.05 kg",
+        "nominal": 0.05,
+        "unit": "kg",
+        "canonical_value": 0.05,
+        "canonical_unit": "kg",
+        "measurement_type": "mass",
+        "tolerance": null,
+        "confidence": 0.88
+      },
+      "mass_verified": true,
+      "mass_candidate": null
+    },
+    {
+      "item": "05",
+      "part_number": "PN-5511-E",
+      "description": "DOWEL PIN D10",
+      "quantity": "2",
+      "material": "Hardened Steel",
+      "mass": "0.02 kg",
+      "remarks": null,
+      "extra": {},
+      "quantity_value": 2,
+      "mass_kg": 0.02,
+      "confidence": 0.92,
+      "structural_confidence": 0.987,
+      "bbox": [
+        1338.0,
+        252.0,
+        2344.0,
+        296.0
+      ],
+      "page": 1,
+      "flags": [],
+      "quantity_measurement": {
+        "raw": "2",
+        "nominal": 2.0,
+        "unit": null,
+        "canonical_value": 2.0,
+        "canonical_unit": "count",
+        "measurement_type": "quantity",
+        "tolerance": null,
+        "confidence": 0.92
+      },
+      "mass_measurement": {
+        "raw": "0.02 kg",
+        "nominal": 0.02,
+        "unit": "kg",
+        "canonical_value": 0.02,
+        "canonical_unit": "kg",
+        "measurement_type": "mass",
+        "tolerance": null,
+        "confidence": 0.92
+      },
+      "mass_verified": true,
+      "mass_candidate": null
+    },
+    {
+      "item": "06",
+      "part_number": "PN-5511-F",
+      "description": "DRAIN PLUG G3/8",
+      "quantity": "1",
+      "material": "Brass",
+      "mass": "0.03 kg",
+      "remarks": null,
+      "extra": {},
+      "quantity_value": 1,
+      "mass_kg": 0.03,
+      "confidence": 0.9,
+      "structural_confidence": 0.987,
+      "bbox": [
+        1338.0,
+        300.0,
+        2345.0,
+        343.0
+      ],
+      "page": 1,
+      "flags": [],
+      "quantity_measurement": {
+        "raw": "1",
+        "nominal": 1.0,
+        "unit": null,
+        "canonical_value": 1.0,
+        "canonical_unit": "count",
+        "measurement_type": "quantity",
+        "tolerance": null,
+        "confidence": 0.9
+      },
+      "mass_measurement": {
+        "raw": "0.03 kg",
+        "nominal": 0.03,
+        "unit": "kg",
+        "canonical_value": 0.03,
+        "canonical_unit": "kg",
+        "measurement_type": "mass",
+        "tolerance": null,
+        "confidence": 0.9
+      },
+      "mass_verified": true,
+      "mass_candidate": null
+    }
+  ],
+  "revisions": [],
+  "notes": [
+    {
+      "page": 1,
+      "number": "1",
+      "text": "MATERIAL CALLOUT: REFER TO BOM FOR MATERIALS",
+      "confidence": 0.917,
+      "bbox": [
+        101.6,
+        1413.9,
+        1001.6,
+        1443.6
+      ]
+    },
+    {
+      "page": 1,
+      "number": "2",
+      "text": "SURFACE FINISH: MACHINED SEATS / Ra 1.6 um, UNMACHINED CAST / Ra 6.3 um",
+      "confidence": 0.913,
+      "bbox": [
+        102.4,
+        1452.9,
+        1354.7,
+        1498.6
+      ]
+    },
+    {
+      "page": 1,
+      "number": "3",
+      "text": "HEAT TREATMENT: STRESS RELIEVE CASTINGS BEFORE FINAL MACHINING",
+      "confidence": 0.903,
+      "bbox": [
+        101.6,
+        1497.8,
+        1331.8,
+        1528.2
+      ]
+    },
+    {
+      "page": 1,
+      "number": null,
+      "text": "UNLESS OTHERWISE SPECIFIED, DIMENSIONS ARE IN MM",
+      "confidence": 0.92,
+      "bbox": [
+        102.4,
+        1549.4,
+        1017.7,
+        1579.0
+      ]
+    },
+    {
+      "page": 1,
+      "number": null,
+      "text": "REMOVE ALL BURRS AND SHARP EDGES",
+      "confidence": 0.916,
+      "bbox": [
+        103.3,
+        1590.9,
+        751.0,
+        1621.4
+      ]
+    }
+  ],
+  "specs": [
+    {
+      "category": "surface_finish",
+      "value": "Ra 1.6 µm",
+      "context": "SURFACE FINISH: MACHINED SEATS / Ra 1.6 um, UNMACHINED CAST / Ra 6.3 um",
+      "source": "notes",
+      "subtype": "roughness",
+      "confidence": 0.913,
+      "bbox": [
+        102.4,
+        1452.9,
+        1354.7,
+        1498.6
+      ],
+      "page": 1
+    },
+    {
+      "category": "surface_finish",
+      "value": "Ra 6.3 µm",
+      "context": "SURFACE FINISH: MACHINED SEATS / Ra 1.6 um, UNMACHINED CAST / Ra 6.3 um",
+      "source": "notes",
+      "subtype": "roughness",
+      "confidence": 0.913,
+      "bbox": [
+        102.4,
+        1452.9,
+        1354.7,
+        1498.6
+      ],
+      "page": 1
+    },
+    {
+      "category": "heat_treatment",
+      "value": "STRESS RELIEVE",
+      "context": "HEAT TREATMENT: STRESS RELIEVE CASTINGS BEFORE FINAL MACHINING",
+      "source": "notes",
+      "subtype": "softening",
+      "confidence": 0.9026,
+      "bbox": [
+        101.6,
+        1497.8,
+        1331.8,
+        1528.2
+      ],
+      "page": 1
+    },
+    {
+      "category": "material",
+      "value": "CAST IRON",
+      "context": "Cast Iron ASTM A48",
+      "source": "bom",
+      "subtype": "cast_iron",
+      "confidence": 0.87,
+      "bbox": [
+        1339.0,
+        60.0,
+        2344.0,
+        104.0
+      ],
+      "page": 1
+    },
+    {
+      "category": "standard",
+      "value": "ASTM A48",
+      "context": "Cast Iron ASTM A48",
+      "source": "bom",
+      "subtype": "standard",
+      "confidence": 0.87,
+      "bbox": [
+        1339.0,
+        60.0,
+        2344.0,
+        104.0
+      ],
+      "page": 1
+    },
+    {
+      "category": "material",
+      "value": "NITRILE",
+      "context": "Nitrile/Cork",
+      "source": "bom",
+      "subtype": "elastomer",
+      "confidence": 0.87,
+      "bbox": [
+        1338.0,
+        156.0,
+        2344.0,
+        200.0
+      ],
+      "page": 1
+    },
+    {
+      "category": "material",
+      "value": "CARBON STEEL GR 8.8",
+      "context": "Carbon Steel Gr 8.8",
+      "source": "bom",
+      "subtype": "custom",
+      "confidence": 0.88,
+      "bbox": [
+        1338.0,
+        204.0,
+        2344.0,
+        247.0
+      ],
+      "page": 1
+    },
+    {
+      "category": "material",
+      "value": "HARDENED STEEL",
+      "context": "Hardened Steel",
+      "source": "bom",
+      "subtype": "custom",
+      "confidence": 0.92,
+      "bbox": [
+        1338.0,
+        252.0,
+        2344.0,
+        296.0
+      ],
+      "page": 1
+    },
+    {
+      "category": "material",
+      "value": "BRASS",
+      "context": "Brass",
+      "source": "bom",
+      "subtype": "copper_alloy",
+      "confidence": 0.9,
+      "bbox": [
+        1338.0,
+        300.0,
+        2345.0,
+        343.0
+      ],
+      "page": 1
+    }
+  ],
+  "dimensions": [
+    {
+      "text": "0207",
+      "nominal": 207.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "0207",
+      "bbox": [
+        584.2,
+        5.9,
+        651.1,
+        39.8
+      ],
+      "page": 1,
+      "confidence": 0.56,
+      "measurement": {
+        "raw": "0207",
+        "nominal": 207.0,
+        "unit": "mm",
+        "canonical_value": 207.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.56
+      }
+    },
+    {
+      "text": "7",
+      "nominal": 7.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "7",
+      "bbox": [
+        815.3,
+        320.9,
+        828.0,
+        344.6
+      ],
+      "page": 1,
+      "confidence": 0.33,
+      "measurement": {
+        "raw": "7",
+        "nominal": 7.0,
+        "unit": "mm",
+        "canonical_value": 7.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.33
+      }
+    },
+    {
+      "text": "03",
+      "nominal": 3.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "03",
+      "bbox": [
+        891.5,
+        287.0,
+        1014.3,
+        355.6
+      ],
+      "page": 1,
+      "confidence": 0.42,
+      "measurement": {
+        "raw": "03",
+        "nominal": 3.0,
+        "unit": "mm",
+        "canonical_value": 3.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.42
+      }
+    },
+    {
+      "text": "DRAIN PLUG G3/8",
+      "nominal": 3.0,
+      "tolerance": null,
+      "prefix": "G",
+      "suffix": null,
+      "dim_type": "thread",
+      "raw": "DRAIN PLUG G3/8",
+      "bbox": [
+        1643.7,
+        308.9,
+        1881.6,
+        335.1
+      ],
+      "page": 1,
+      "confidence": 0.9162,
+      "measurement": {
+        "raw": "DRAIN PLUG G3/8",
+        "nominal": 3.0,
+        "unit": null,
+        "canonical_value": 3.0,
+        "canonical_unit": null,
+        "measurement_type": "thread",
+        "tolerance": null,
+        "confidence": 0.9162
+      }
+    },
+    {
+      "text": "120",
+      "nominal": 120.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "120",
+      "bbox": [
+        1675.6,
+        403.0,
+        1717.9,
+        425.0
+      ],
+      "page": 1,
+      "confidence": 0.96,
+      "measurement": {
+        "raw": "120",
+        "nominal": 120.0,
+        "unit": "mm",
+        "canonical_value": 120.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.96
+      }
+    },
+    {
+      "text": "77",
+      "nominal": 77.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "77",
+      "bbox": [
+        397.1,
+        515.6,
+        455.5,
+        567.3
+      ],
+      "page": 1,
+      "confidence": 0.56,
+      "measurement": {
+        "raw": "77",
+        "nominal": 77.0,
+        "unit": "mm",
+        "canonical_value": 77.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.56
+      }
+    },
+    {
+      "text": "24",
+      "nominal": 24.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "24",
+      "bbox": [
+        2058.2,
+        979.6,
+        2098.9,
+        1018.5
+      ],
+      "page": 1,
+      "confidence": 0.56,
+      "measurement": {
+        "raw": "24",
+        "nominal": 24.0,
+        "unit": "mm",
+        "canonical_value": 24.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.56
+      }
+    },
+    {
+      "text": "74",
+      "nominal": 74.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "74",
+      "bbox": [
+        397.1,
+        954.2,
+        436.9,
+        972.8
+      ],
+      "page": 1,
+      "confidence": 0.51,
+      "measurement": {
+        "raw": "74",
+        "nominal": 74.0,
+        "unit": "mm",
+        "canonical_value": 74.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.51
+      }
+    },
+    {
+      "text": "39",
+      "nominal": 39.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "39",
+      "bbox": [
+        1309.8,
+        1245.4,
+        1337.7,
+        1266.6
+      ],
+      "page": 1,
+      "confidence": 0.96,
+      "measurement": {
+        "raw": "39",
+        "nominal": 39.0,
+        "unit": "mm",
+        "canonical_value": 39.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.96
+      }
+    },
+    {
+      "text": "30",
+      "nominal": 30.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "30",
+      "bbox": [
+        2061.6,
+        1244.6,
+        2090.4,
+        1267.5
+      ],
+      "page": 1,
+      "confidence": 0.96,
+      "measurement": {
+        "raw": "30",
+        "nominal": 30.0,
+        "unit": "mm",
+        "canonical_value": 30.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.96
+      }
+    },
+    {
+      "text": "250",
+      "nominal": 250.0,
+      "tolerance": null,
+      "prefix": null,
+      "suffix": null,
+      "dim_type": "linear",
+      "raw": "250",
+      "bbox": [
+        1675.6,
+        1289.5,
+        1719.6,
+        1311.5
+      ],
+      "page": 1,
+      "confidence": 0.96,
+      "measurement": {
+        "raw": "250",
+        "nominal": 250.0,
+        "unit": "mm",
+        "canonical_value": 250.0,
+        "canonical_unit": "mm",
+        "measurement_type": "linear",
+        "tolerance": null,
+        "confidence": 0.96
+      }
+    }
+  ],
+  "pages": [
+    {
+      "index": 0,
+      "source": "ocr",
+      "width": 2400,
+      "height": 1692,
+      "dpi": 254.0,
+      "skew_deg": -0.0,
+      "rotation_deg": 0,
+      "overlay_path": "C:\\Users\\Asm50079\\Documents\\GitHub\\BOM-EXTRACTOR\\storage\\previews\\693086d2\\overlays\\legacy_drawing_4_p1_overlay.png",
+      "kind": "pdf-scan",
+      "layout": "",
+      "regions": [
+        {
+          "kind": "title_block",
+          "bbox": [
+            1378.0,
+            1383.0,
+            2345.0,
+            1644.0
+          ],
+          "page": 0,
+          "confidence": 0.908
+        },
+        {
+          "kind": "bom",
+          "bbox": [
+            1338.0,
+            12.0,
+            2345.0,
+            343.0
+          ],
+          "page": 0,
+          "confidence": 0.926
+        },
+        {
+          "kind": "notes",
+          "bbox": [
+            100.8,
+            1358.1,
+            1354.7,
+            1621.4
+          ],
+          "page": 0,
+          "confidence": 0.914
+        }
+      ],
+      "image_url": "/api/drawings/693086d2/pages/1/image",
+      "overlay_url": "/api/drawings/693086d2/pages/1/overlay"
+    }
+  ],
+  "warnings": [
+    "page 1: image resolution 96 dpi does not match the lettering size - using estimated 254 dpi"
+  ],
+  "processing_seconds": 17.4
+}
