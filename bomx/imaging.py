@@ -339,9 +339,14 @@ def ocr_cells(clean_gray: np.ndarray, cells: Iterable, dpi: float, lang: str,
         return cell.id, ws
 
     out: dict[int, list[Word]] = {}
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        for cid, ws in ex.map(run, cells):
+    if workers <= 1 or len(cells) <= 1:
+        for cell in cells:
+            cid, ws = run(cell)
             out[cid] = ws
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for cid, ws in ex.map(run, cells):
+                out[cid] = ws
     return out
 
 

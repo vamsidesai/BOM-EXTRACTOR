@@ -100,7 +100,9 @@ def analyse_page(raw: RawPage, cfg: dict) -> PageAnalysis:
         if cfg.get("cell_ocr", True) and cells:
             groups0 = group_cells(cells, dpi)
             targets = [c for g in groups0 if len(g) >= 3 for c in g]
-            redo = imaging.ocr_cells(clean, targets, dpi, cfg["ocr_lang"], cfg["min_word_conf"])
+            cell_workers = int(cfg.get("ocr_workers", 1 if cfg.get("_parallel") else 4))
+            redo = imaging.ocr_cells(clean, targets, dpi, cfg["ocr_lang"], cfg["min_word_conf"],
+                                     workers=cell_workers)
             for c in targets:
                 new = redo.get(c.id) or []
                 if new and (not c.words or mean_conf(new) >= mean_conf(c.words) - 0.05
@@ -244,8 +246,9 @@ def _reread_reconstructed(t: Table, clean, dpi: float, cfg: dict) -> None:
             jobs[len(jobs)] = (row, col.key, _Box(len(jobs), col.x0, rb[1], col.x1, rb[3]))
     if not jobs:
         return
+    cell_workers = int(cfg.get("ocr_workers", 1 if cfg.get("_parallel") else 4))
     got = imaging.ocr_cells(clean, [b for *_, b in jobs.values()], dpi, cfg["ocr_lang"],
-                            cfg["min_word_conf"])
+                            cfg["min_word_conf"], workers=cell_workers)
     from .layout import _cell_text, TableCellValue
     for i, (row, key, box) in jobs.items():
         ws = got.get(i) or []
@@ -312,97 +315,82 @@ def _reread_notes(lines, bb, clean, dpi: float, cfg: dict, masks):
     return merged, bb
 
 
-def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
-                 overlay_dir: Optional[Path] = None) -> DrawingResult:
-    t0 = time.time()
-    path = Path(path)
-    imaging.find_tesseract(cfg.get("tesseract_cmd"))
-    res = DrawingResult(source_file=str(path))
-    title: dict[str, FieldValue] = {}
-    all_specs: list[SpecCallout] = []
-    all_dims: list[Dimension] = []
-    bom_cols: list[str] = []
+def _extract_page_content(pa: PageAnalysis, raw: RawPage, cfg: dict, page_no: int,
+                          title: dict[str, FieldValue], bom_cols: list[str],
+                          res: DrawingResult, all_specs: list[SpecCallout],
+                          all_dims: list[Dimension]) -> None:
+    """Stage 3: Extract structured records (title block, BOM, revisions, notes, specs, dimensions)."""
+    pr = pa.result
 
-    for raw in iter_pages(path, cfg["dpi"], cfg["max_pixels"], force_ocr, cfg["native_min_words"], cfg):
-        res.warnings.extend(f"page {raw.index + 1}: {n}" for n in raw.notes)
-        pa = analyse_page(raw, cfg)
-        pr = pa.result
-        res.pages.append(pr)
-        page_no = raw.index + 1
+    # ---------------- title block
+    page_text = "\n".join(l.text for l in group_lines(pa.words))
+    tb = parse_title_block(pa.tb_cells, cfg["title_labels"], raw.dpi, page_text, cfg["date_order"])
+    _merge_cad_fields(tb, raw.cad_fields, cfg, res.warnings, page_no)
+    for k, v in tb.items():
+        if k not in title and v.value:
+            title[k] = v
 
-        # ---------------- title block
-        page_text = "\n".join(l.text for l in group_lines(pa.words))
-        tb = parse_title_block(pa.tb_cells, cfg["title_labels"], raw.dpi, page_text, cfg["date_order"])
-        _merge_cad_fields(tb, raw.cad_fields, cfg, res.warnings, page_no)
-        for k, v in tb.items():
-            if k not in title and v.value:
-                title[k] = v
+    # ---------------- BOM
+    for t in pa.bom_tables:
+        rows, warns = table_to_bom(t, page_no, cfg["low_conf_threshold"])
+        res.bom.extend(rows)
+        res.warnings.extend(f"page {page_no}: {w}" for w in warns)
+        for c in t.columns:
+            if c.key not in bom_cols:
+                bom_cols.append(c.key)
+        if t.method == "text":
+            res.warnings.append(f"page {page_no}: BOM read from text alignment (no ruling lines) "
+                                "- verify column assignment")
 
-        # ---------------- BOM
-        for t in pa.bom_tables:
-            rows, warns = table_to_bom(t, page_no, cfg["low_conf_threshold"])
-            res.bom.extend(rows)
-            res.warnings.extend(f"page {page_no}: {w}" for w in warns)
-            for c in t.columns:
-                if c.key not in bom_cols:
-                    bom_cols.append(c.key)
-            if t.method == "text":
-                res.warnings.append(f"page {page_no}: BOM read from text alignment (no ruling lines) "
-                                    "- verify column assignment")
+    # ---------------- revisions
+    for t in pa.rev_tables:
+        res.revisions.extend(table_to_revisions(t, page_no, cfg["date_order"]))
 
-        # ---------------- revisions
-        for t in pa.rev_tables:
-            res.revisions.extend(table_to_revisions(t, page_no, cfg["date_order"]))
+    # ---------------- notes & specs
+    for lines, bb in pa.notes_blocks:
+        for item in split_numbered_notes(lines):
+            if pr.source == "ocr":
+                item["text"] = fix_ocr_confusions(item["text"])
+            res.notes.append({"page": page_no, "number": item["number"], "text": item["text"],
+                              "confidence": round(item["conf"], 3),
+                              "bbox": [round(v, 1) for v in item["bbox"]]})
+            all_specs += find_specs(item["text"], "notes", page_no, item["bbox"], item["conf"])
+    for k in ("material", "finish", "heat_treatment"):
+        fv = tb.get(k)
+        if fv and fv.value:
+            found = find_specs(fv.value, "title_block", page_no, fv.bbox, fv.confidence)
+            if not found:
+                cat = {"material": "material", "finish": "surface_finish",
+                       "heat_treatment": "heat_treatment"}[k]
+                found = [SpecCallout(cat, fv.value.upper(), fv.value, "title_block", "unrecognised",
+                                     fv.confidence, fv.bbox, page_no)]
+            all_specs += found
+    for r in [r for r in res.bom if r.page == page_no]:
+        if r.material:
+            found = find_specs(r.material, "bom", page_no, r.bbox, r.confidence,
+                               categories={"material", "heat_treatment", "standard"})
+            if not found and len(r.material.strip()) >= 2:
+                found = [SpecCallout("material", r.material.strip().upper(), r.material.strip(),
+                                     "bom", "custom", r.confidence, r.bbox, page_no)]
+            all_specs += found
+        if r.extra.get("finish"):
+            all_specs += find_specs(r.extra["finish"], "bom", page_no, r.bbox, r.confidence,
+                                    categories={"surface_finish", "heat_treatment"})
+    note_boxes = [bb for _, bb in pa.notes_blocks]
+    loose = [w for w in pa.free_words if not any(_inside(w, b) for b in note_boxes)]
+    for line in group_lines(loose):
+        for seg in split_segments(line, 3.0):
+            all_specs += find_specs(seg.text, "page_text", page_no, seg.bbox, seg.conf,
+                                    categories={"material", "surface_finish", "heat_treatment"})
 
-        # ---------------- notes & specs
-        for lines, bb in pa.notes_blocks:
-            for item in split_numbered_notes(lines):
-                if pr.source == "ocr":
-                    item["text"] = fix_ocr_confusions(item["text"])
-                res.notes.append({"page": page_no, "number": item["number"], "text": item["text"],
-                                  "confidence": round(item["conf"], 3),
-                                  "bbox": [round(v, 1) for v in item["bbox"]]})
-                all_specs += find_specs(item["text"], "notes", page_no, item["bbox"], item["conf"])
-        for k in ("material", "finish", "heat_treatment"):
-            fv = tb.get(k)
-            if fv and fv.value:
-                found = find_specs(fv.value, "title_block", page_no, fv.bbox, fv.confidence)
-                if not found:
-                    cat = {"material": "material", "finish": "surface_finish",
-                           "heat_treatment": "heat_treatment"}[k]
-                    found = [SpecCallout(cat, fv.value.upper(), fv.value, "title_block", "unrecognised",
-                                         fv.confidence, fv.bbox, page_no)]
-                all_specs += found
-        for r in [r for r in res.bom if r.page == page_no]:
-            if r.material:
-                found = find_specs(r.material, "bom", page_no, r.bbox, r.confidence,
-                                   categories={"material", "heat_treatment", "standard"})
-                if not found and len(r.material.strip()) >= 2:
-                    found = [SpecCallout("material", r.material.strip().upper(), r.material.strip(),
-                                         "bom", "custom", r.confidence, r.bbox, page_no)]
-                all_specs += found
-            if r.extra.get("finish"):
-                all_specs += find_specs(r.extra["finish"], "bom", page_no, r.bbox, r.confidence,
-                                        categories={"surface_finish", "heat_treatment"})
-        note_boxes = [bb for _, bb in pa.notes_blocks]
-        loose = [w for w in pa.free_words if not any(_inside(w, b) for b in note_boxes)]
-        for line in group_lines(loose):
-            for seg in split_segments(line, 3.0):
-                all_specs += find_specs(seg.text, "page_text", page_no, seg.bbox, seg.conf,
-                                        categories={"material", "surface_finish", "heat_treatment"})
+    # ---------------- dimensions
+    all_dims += extract_dimensions_from_words(pa.words, page_no)
 
-        # ---------------- dimensions
-        all_dims += extract_dimensions_from_words(pa.words, page_no)
 
-        if overlay_dir is not None:
-            from .overlay import render_page
-            overlay_dir.mkdir(parents=True, exist_ok=True)
-            out = overlay_dir / f"{path.stem}_p{page_no}_overlay.png"
-            render_page(pa, [s for s in all_specs if s.page == page_no],
-                        [r for r in res.bom if r.page == page_no], out)
-            pr.overlay_path = str(out)
-
-    # ---------------- consolidate
+def _consolidate_and_validate(res: DrawingResult, title: dict[str, FieldValue],
+                              bom_cols: list[str], all_specs: list[SpecCallout],
+                              all_dims: list[Dimension], cfg: dict, t0: float) -> DrawingResult:
+    """Stage 4: Consolidate multi-page findings, cross-check revisions, and build validated summary."""
     res.title_block = title
     res.bom_columns = bom_cols
     res.specs = _dedupe_specs(all_specs)
@@ -418,8 +406,43 @@ def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
                             f"revision-table entry '{latest.rev}'")
     res.summary = build_summary(res, cfg)
     res.processing_seconds = time.time() - t0
-
     return res
+
+
+def process_file(path: str | Path, cfg: dict, force_ocr: bool = False,
+                 overlay_dir: Optional[Path] = None) -> DrawingResult:
+    """Stage 5: Main orchestrator coordinating ingestion, analysis, extraction, and validation."""
+    t0 = time.time()
+    path = Path(path)
+    imaging.find_tesseract(cfg.get("tesseract_cmd"))
+    res = DrawingResult(source_file=str(path))
+    title: dict[str, FieldValue] = {}
+    all_specs: list[SpecCallout] = []
+    all_dims: list[Dimension] = []
+    bom_cols: list[str] = []
+
+    # Stage 1: Ingestion & Iteration
+    for raw in iter_pages(path, cfg["dpi"], cfg["max_pixels"], force_ocr, cfg["native_min_words"], cfg):
+        res.warnings.extend(f"page {raw.index + 1}: {n}" for n in raw.notes)
+        # Stage 2: Page Layout & Detection
+        pa = analyse_page(raw, cfg)
+        pr = pa.result
+        res.pages.append(pr)
+        page_no = raw.index + 1
+
+        # Stage 3: Extraction
+        _extract_page_content(pa, raw, cfg, page_no, title, bom_cols, res, all_specs, all_dims)
+
+        if overlay_dir is not None:
+            from .overlay import render_page
+            overlay_dir.mkdir(parents=True, exist_ok=True)
+            out = overlay_dir / f"{path.stem}_p{page_no}_overlay.png"
+            render_page(pa, [s for s in all_specs if s.page == page_no],
+                        [r for r in res.bom if r.page == page_no], out)
+            pr.overlay_path = str(out)
+
+    # Stage 4: Consolidation & Validation
+    return _consolidate_and_validate(res, title, bom_cols, all_specs, all_dims, cfg, t0)
 
 
 def _merge_cad_fields(tb: dict[str, FieldValue], cad_fields: dict, cfg: dict,

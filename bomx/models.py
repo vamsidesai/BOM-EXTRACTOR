@@ -125,6 +125,50 @@ class BomRow:
     page: int = 0
     flags: list[str] = field(default_factory=list)
 
+    @property
+    def quantity_measurement(self) -> Optional["Measurement"]:
+        if self.quantity_value is None and not self.quantity:
+            return None
+        return Measurement(
+            raw=self.quantity or "",
+            nominal=float(self.quantity_value) if self.quantity_value is not None else None,
+            unit=None,
+            canonical_value=float(self.quantity_value) if self.quantity_value is not None else None,
+            canonical_unit="count",
+            measurement_type="quantity",
+            confidence=self.confidence
+        )
+
+    @property
+    def mass_measurement(self) -> Optional["Measurement"]:
+        if self.mass_kg is None and not self.mass:
+            return None
+        return Measurement(
+            raw=self.mass or "",
+            nominal=self.mass_kg,
+            unit="KG",
+            canonical_value=self.mass_kg,
+            canonical_unit="KG",
+            measurement_type="mass",
+            confidence=self.confidence
+        )
+
+
+@dataclass
+class Measurement:
+    """Canonical model for engineering measurements (mass, quantity, dimensions)."""
+    raw: str
+    nominal: Optional[float] = None
+    unit: Optional[str] = None
+    canonical_value: Optional[float] = None  # in base unit (kg, mm, count)
+    canonical_unit: Optional[str] = None
+    measurement_type: str = "generic"  # quantity | mass | linear | diameter | radius | thread | angle | roughness
+    tolerance: Optional[str] = None
+    confidence: float = 1.0
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items()}
+
 
 @dataclass
 class RevisionRow:
@@ -165,6 +209,19 @@ class Dimension:
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items()}
+
+    @property
+    def as_measurement(self) -> Measurement:
+        return Measurement(
+            raw=self.raw or self.text,
+            nominal=self.nominal,
+            unit="mm" if self.dim_type in ("linear", "diameter", "radius", "chamfer") else None,
+            canonical_value=self.nominal,
+            canonical_unit="mm" if self.dim_type in ("linear", "diameter", "radius", "chamfer") else None,
+            measurement_type=self.dim_type,
+            tolerance=self.tolerance,
+            confidence=self.confidence
+        )
 
 
 @dataclass

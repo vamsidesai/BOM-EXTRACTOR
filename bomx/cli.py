@@ -65,6 +65,9 @@ def cmd_extract(a) -> int:
         overrides["auto_rotate"] = False
     overrides.update({"cad_layouts": a.cad_layouts, "dwg_converter": a.dwg_converter,
                       "oda_converter": a.oda, "libredwg_path": a.libredwg})
+    if a.workers > 1:
+        overrides["_parallel"] = True
+        overrides["ocr_workers"] = 1
     cfg = load_config(a.config, overrides)
     formats = {f.strip().lower() for f in a.formats.split(",") if f.strip()}
     bad = formats - {"xlsx", "csv", "json"}
@@ -126,8 +129,10 @@ def cmd_extract(a) -> int:
          "errors": sum(1 for r in report if r["status"] == "error"),
          "seconds": round(time.time() - t0, 1), "results": report}, indent=2, default=str), encoding="utf-8")
     n_err = sum(1 for r in report if r["status"] == "error")
-    print(f"done in {time.time() - t0:.1f}s - {len(results)} ok/review, {n_err} error(s)")
-    return 1 if n_err and not results else 0
+    n_rev = sum(1 for r in report if r["status"] == "review")
+    n_ok = sum(1 for r in report if r["status"] == "ok")
+    print(f"done in {time.time() - t0:.1f}s - {n_ok} ok, {n_rev} need review, {n_err} error(s)")
+    return 1 if n_err > 0 else 0
 
 
 def cmd_check(a) -> int:

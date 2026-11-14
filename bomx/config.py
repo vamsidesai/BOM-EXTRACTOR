@@ -116,6 +116,38 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def validate_config(cfg: dict) -> dict:
+    """Validate configuration schema, data types, and allowed ranges."""
+    # Numeric ranges
+    if not isinstance(cfg.get("dpi"), (int, float)) or not (50 <= cfg["dpi"] <= 1200):
+        raise ValueError(f"Invalid config 'dpi': {cfg.get('dpi')}. Must be between 50 and 1200.")
+    if not isinstance(cfg.get("max_pixels"), (int, float)) or cfg["max_pixels"] <= 100_000:
+        raise ValueError(f"Invalid config 'max_pixels': {cfg.get('max_pixels')}. Must be >= 100,000.")
+    if not isinstance(cfg.get("min_word_conf"), (int, float)) or not (0 <= cfg["min_word_conf"] <= 100):
+        raise ValueError(f"Invalid config 'min_word_conf': {cfg.get('min_word_conf')}. Must be in range 0..100.")
+    if not isinstance(cfg.get("low_conf_threshold"), (int, float)) or not (0.0 <= cfg["low_conf_threshold"] <= 1.0):
+        raise ValueError(f"Invalid config 'low_conf_threshold': {cfg.get('low_conf_threshold')}. Must be in range 0.0..1.0.")
+
+    # Enumerated choices
+    date_order = str(cfg.get("date_order", "dmy")).lower()
+    if date_order not in ("dmy", "mdy", "ymd"):
+        raise ValueError(f"Invalid config 'date_order': '{date_order}'. Allowed: 'dmy', 'mdy', 'ymd'.")
+    cad_layouts = str(cfg.get("cad_layouts", "auto")).lower()
+    if cad_layouts not in ("auto", "model", "paper", "all"):
+        raise ValueError(f"Invalid config 'cad_layouts': '{cad_layouts}'. Allowed: 'auto', 'model', 'paper', 'all'.")
+    dwg_converter = str(cfg.get("dwg_converter", "auto")).lower()
+    if dwg_converter not in ("auto", "oda", "libredwg", "aspose"):
+        raise ValueError(f"Invalid config 'dwg_converter': '{dwg_converter}'. Allowed: 'auto', 'oda', 'libredwg', 'aspose'.")
+
+    # Vocabularies
+    if not isinstance(cfg.get("bom_headers"), dict):
+        raise ValueError("Invalid config 'bom_headers': must be a dictionary mapping field names to lists of synonyms.")
+    if not isinstance(cfg.get("title_labels"), dict):
+        raise ValueError("Invalid config 'title_labels': must be a dictionary mapping field names to lists of labels.")
+
+    return cfg
+
+
 def load_config(path: str | Path | None = None, overrides: dict | None = None) -> dict:
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if path:
@@ -124,7 +156,7 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
         _merge(cfg, user)
     if overrides:
         _merge(cfg, {k: v for k, v in overrides.items() if v is not None})
-    return cfg
+    return validate_config(cfg)
 
 
 def _merge(base: dict, new: dict) -> None:

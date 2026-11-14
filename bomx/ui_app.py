@@ -5,8 +5,10 @@ It opens in your browser at http://localhost:8501
 """
 from __future__ import annotations
 
+import atexit
 import io
 import json
+import shutil
 import sys
 import tempfile
 import traceback
@@ -27,8 +29,15 @@ from bomx.config import load_config  # noqa: E402
 from bomx.ingest import SUPPORTED_EXT, discover_inputs  # noqa: E402
 from bomx.pipeline import process_file  # noqa: E402
 
-Image.MAX_IMAGE_PIXELS = None
+Image.MAX_IMAGE_PIXELS = 100_000_000
 st.set_page_config(page_title="bomx · Drawing BOM Extractor", page_icon="📐", layout="wide")
+
+def _cleanup_workdir(path: str):
+    try:
+        if path and Path(path).exists():
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
 
 ss = st.session_state
 ss.setdefault("results", {})   # key -> {"res": DrawingResult|None, "error": str|None, "path": str}
@@ -38,7 +47,10 @@ ss.setdefault("nonce", {})     # key -> int  (fresh editor widgets each time a d
 ss.setdefault("verified", {})  # key -> bool
 ss.setdefault("current", None)
 ss.setdefault("seq", 0)        # running input counter (stable ordering across runs)
-ss.setdefault("workdir", tempfile.mkdtemp(prefix="bomx_ui_"))
+if "workdir" not in ss:
+    wd_temp = tempfile.mkdtemp(prefix="bomx_ui_")
+    ss["workdir"] = wd_temp
+    atexit.register(_cleanup_workdir, wd_temp)
 
 TABLES = ["title_block", "bom", "specs", "revisions", "notes"]
 TITLE_KEYS = ["drawing_number", "drawing_title", "revision", "drawn_by", "date", "scale", "projection", "sheet"]
@@ -309,12 +321,16 @@ if run:
         if vocab is not None:
             vocab_path = wd / "vocab.yaml"
             vocab_path.write_bytes(vocab.getbuffer())
-        cfg = load_config(vocab_path, {"dpi": dpi, "cell_ocr": cell_ocr, "date_order": date_order,
-                                       "ocr_lang": lang.strip() or "eng",
-                                       "tesseract_cmd": tess.strip() or None,
-                                       "cad_layouts": cad_layouts,
-                                       "oda_converter": oda.strip().strip('"') or None,
-                                       "libredwg_path": libredwg.strip().strip('"') or None})
+        ui_overrides = {"dpi": dpi, "cell_ocr": cell_ocr, "date_order": date_order,
+                        "ocr_lang": lang.strip() or "eng",
+                        "tesseract_cmd": tess.strip() or None,
+                        "cad_layouts": cad_layouts,
+                        "oda_converter": oda.strip().strip('"') or None,
+                        "libredwg_path": libredwg.strip().strip('"') or None}
+        if workers > 1:
+            ui_overrides["_parallel"] = True
+            ui_overrides["ocr_workers"] = 1
+        cfg = load_config(vocab_path, ui_overrides)
         bar = st.progress(0.0, text=f"Processing {len(inputs)} drawing(s)…")
         done = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
