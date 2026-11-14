@@ -1,6 +1,7 @@
 """Core data structures shared across the extraction pipeline."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
@@ -108,6 +109,22 @@ class FieldValue:
 
 
 @dataclass
+class Measurement:
+    """Canonical model for engineering measurements (mass, quantity, dimensions)."""
+    raw: str
+    nominal: Optional[float] = None
+    unit: Optional[str] = None
+    canonical_value: Optional[float] = None  # in base unit (kg, mm, count, deg)
+    canonical_unit: Optional[str] = None
+    measurement_type: str = "generic"  # quantity | mass | linear | diameter | radius | thread | chamfer | angle | roughness
+    tolerance: Optional[str] = None
+    confidence: float = 1.0
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items()}
+
+
+@dataclass
 class BomRow:
     item: Optional[str] = None
     part_number: Optional[str] = None
@@ -119,10 +136,117 @@ class BomRow:
     extra: dict[str, str] = field(default_factory=dict)
     quantity_value: Optional[float] = None
     mass_kg: Optional[float] = None
-    confidence: float = 1.0
+    confidence: float = 1.0  # OCR / character recognition confidence
+    structural_confidence: float = 1.0  # layout / column assignment confidence
     bbox: Optional[BBox] = None
     page: int = 0
     flags: list[str] = field(default_factory=list)
+    quantity_measurement: Optional[Measurement] = None
+    mass_measurement: Optional[Measurement] = None
+    mass_verified: bool = False
+    mass_candidate: Optional[float] = None
+
+    def __post_init__(self):
+        if "mass_decimal_ambiguous" in self.flags:
+            if self.mass_kg is not None and self.mass_candidate is None:
+                self.mass_candidate = self.mass_kg
+            self.mass_kg = None
+            self.mass_measurement = None
+            self.mass_verified = False
+        elif self.mass_kg is not None:
+            self.mass_verified = True
+
+        if self.quantity_measurement is None and (self.quantity_value is not None or self.quantity):
+            raw = self.quantity or (str(self.quantity_value) if self.quantity_value is not None else "")
+            nom = float(self.quantity_value) if self.quantity_value is not None else None
+            unit = None
+            if self.quantity:
+                num_m = re.search(r"[-+]?(?:\d+(?:[.,]\d+)?|\.\d+)", self.quantity)
+                if num_m and nom is None:
+                    try:
+                        nom = float(num_m.group(0).replace(",", "."))
+                    except ValueError:
+                        pass
+                m = re.search(r"([A-Za-z]+)", self.quantity)
+                if m:
+                    unit = m.group(1)
+
+            canon_val = float(self.quantity_value) if self.quantity_value is not None else (nom if nom is not None else None)
+            canon_unit = "count"
+            if unit:
+                u_upper = unit.upper()
+                if u_upper in ("M", "MTR"):
+                    canon_unit = "m"
+                elif u_upper == "MM":
+                    canon_unit = "m"
+                    if canon_val is not None:
+                        canon_val = canon_val / 1000.0
+                elif u_upper.startswith("KG"):
+                    canon_unit = "kg"
+                elif u_upper in ("L", "LTR"):
+                    canon_unit = "l"
+
+            self.quantity_measurement = Measurement(
+                raw=raw,
+                nominal=nom,
+                unit=unit,
+                canonical_value=canon_val,
+                canonical_unit=canon_unit,
+                measurement_type="quantity",
+                confidence=self.confidence
+            )
+
+        if self.mass_measurement is None and (self.mass_kg is not None or self.mass) and "mass_decimal_ambiguous" not in self.flags:
+            raw = self.mass or (f"{self.mass_kg} kg" if self.mass_kg is not None else "")
+            nom = None
+            unit = None
+            if self.mass:
+                num_m = re.search(r"[-+]?(?:\d+(?:[.,]\d+)?|\.\d+)", self.mass)
+                if num_m:
+                    try:
+                        nom = float(num_m.group(0).replace(",", "."))
+                    except ValueError:
+                        pass
+                m = re.search(r"([A-Za-z]+)", self.mass)
+                if m:
+                    unit = m.group(1)
+
+            if unit is None and self.mass_kg is not None:
+                unit = "kg"
+            if nom is None and self.mass_kg is not None:
+                nom = self.mass_kg
+
+            canon_val = self.mass_kg
+            canon_unit = "kg"
+            if canon_val is None and nom is not None:
+                u_upper = (unit or "KG").upper()
+                if u_upper.startswith("KG"):
+                    canon_val = nom
+                elif u_upper in ("G", "GM", "GMS", "GRAM", "GRAMS"):
+                    canon_val = nom / 1000.0
+                elif u_upper.startswith("LB") or u_upper.startswith("POUND"):
+                    canon_val = nom * 0.45359237
+                elif u_upper.startswith("OZ") or u_upper.startswith("OUNCE"):
+                    canon_val = nom * 0.0283495
+                elif u_upper == "MG":
+                    canon_val = nom / 1_000_000.0
+                elif u_upper.startswith("T"):
+                    canon_val = nom * 1000.0
+                else:
+                    canon_val = nom
+
+            if self.mass_kg is None and canon_val is not None:
+                self.mass_kg = canon_val
+
+            self.mass_measurement = Measurement(
+                raw=raw,
+                nominal=nom,
+                unit=unit,
+                canonical_value=canon_val,
+                canonical_unit=canon_unit,
+                measurement_type="mass",
+                confidence=self.confidence
+            )
 
 
 @dataclass
@@ -161,6 +285,30 @@ class Dimension:
     bbox: Optional[BBox] = None
     page: int = 0
     confidence: float = 1.0
+    measurement: Optional[Measurement] = None
+
+    def __post_init__(self):
+        if self.measurement is None:
+            raw = self.raw or self.text
+            unit = "°" if self.dim_type == "angle" else ("mm" if self.dim_type in ("linear", "diameter", "radius", "chamfer") else None)
+            canonical_unit = "deg" if self.dim_type == "angle" else ("mm" if self.dim_type in ("linear", "diameter", "radius", "chamfer") else None)
+            self.measurement = Measurement(
+                raw=raw,
+                nominal=self.nominal,
+                unit=unit,
+                canonical_value=self.nominal,
+                canonical_unit=canonical_unit,
+                measurement_type=self.dim_type,
+                tolerance=self.tolerance,
+                confidence=self.confidence
+            )
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items()}
+
+    @property
+    def as_measurement(self) -> Measurement:
+        return self.measurement
 
 
 @dataclass
@@ -232,6 +380,8 @@ def _clean(d: dict) -> dict:
             v = _rb(v)
         elif isinstance(v, float):
             v = round(v, 4)
+        elif isinstance(v, dict):
+            v = _clean(v)
         out[k] = v
     return out
 

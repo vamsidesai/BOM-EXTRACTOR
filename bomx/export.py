@@ -23,7 +23,8 @@ TB_ORDER = ["drawing_number", "drawing_title", "revision", "drawn_by", "date", "
 SUMMARY_COLS = ["file", "drawing_number", "drawing_title", "revision", "author_date", "drawn_by", "date",
                 "scale", "projection", "sheet", "material_callout", "surface_finish", "heat_treatment",
                 "standards", "assembly_weight", "bom_items", "bom_total_quantity", "revisions", "notes",
-                "pages", "file_format", "page_kinds", "input_type", "mean_confidence", "review_required", "review_reasons", "status"]
+                "pages", "file_format", "page_kinds", "input_type", "mean_confidence", "text_confidence",
+                "structural_confidence", "review_required", "review_reasons", "status"]
 
 
 # ---------------------------------------------------------------- row builders
@@ -37,10 +38,18 @@ def bom_records(res: DrawingResult) -> list[dict]:
         for k in BOM_STD:
             rec[k] = getattr(r, k)
         rec["quantity_value"] = r.quantity_value
+        rec["quantity_unit"] = r.quantity_measurement.unit if r.quantity_measurement else None
+        rec["mass_nominal"] = r.mass_measurement.nominal if r.mass_measurement else None
+        rec["mass_unit"] = r.mass_measurement.unit if r.mass_measurement else None
         rec["mass_kg"] = round(r.mass_kg, 4) if r.mass_kg is not None else None
+        rec["mass_verified"] = getattr(r, "mass_verified", False)
+        rec["mass_candidate"] = getattr(r, "mass_candidate", None)
+        rec["quantity_measurement"] = r.quantity_measurement.to_dict() if r.quantity_measurement else None
+        rec["mass_measurement"] = r.mass_measurement.to_dict() if r.mass_measurement else None
         for k in extras:
             rec[k] = r.extra.get(k)
         rec["confidence"] = r.confidence
+        rec["structural_confidence"] = getattr(r, "structural_confidence", 1.0)
         rec["flags"] = ";".join(r.flags) or None
         out.append(rec)
     return out
@@ -69,6 +78,14 @@ def revision_records(res: DrawingResult) -> list[dict]:
 def note_records(res: DrawingResult) -> list[dict]:
     return [{"drawing_number": _dn(res), "page": n["page"], "number": n["number"], "text": n["text"],
              "confidence": n["confidence"]} for n in res.notes]
+
+
+def dimension_records(res: DrawingResult) -> list[dict]:
+    return [{"drawing_number": _dn(res), "page": d.page, "type": d.dim_type,
+             "text": d.text, "nominal": d.nominal, "tolerance": d.tolerance,
+             "prefix": d.prefix, "suffix": d.suffix, "raw": d.raw,
+             "confidence": round(d.confidence, 3),
+             "measurement": d.measurement.to_dict() if d.measurement else None} for d in res.dimensions]
 
 
 # Target attribute list (SOW section 3): (category, field name, description, getter)
@@ -120,8 +137,8 @@ def _attr_sheet(ws, drawings: list[tuple[dict, list[dict]]]) -> None:
     band = PatternFill("solid", fgColor="F2F2F2")
     for summary, bom in drawings:
         for i, rec in enumerate(attribute_records(summary, bom)):
-            row = ([summary.get("drawing_number") or summary.get("file")] if multi else []) + \
-                  [rec[c] for c in ATTR_COLS]
+            row = ([_cell(summary.get("drawing_number") or summary.get("file"))] if multi else []) + \
+                  [_cell(rec[c]) for c in ATTR_COLS]
             ws.append(row)
             r = ws.max_row
             for j in range(1, len(row) + 1):
@@ -151,20 +168,32 @@ def write_json(res: DrawingResult, path: Path) -> None:
     path.write_text(json.dumps(res.to_dict(), indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_formula(v):
+    if isinstance(v, str) and v and v[0] in _FORMULA_PREFIXES:
+        return f"'{v}"
+    return v
+
+
 def write_csv(records: list[dict], path: Path, columns: list[str] | None = None) -> None:
     cols = columns or _columns(records)
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:  # BOM-prefixed for Excel
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for r in records:
-            w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in cols})
+            w.writerow({k: ("" if r.get(k) is None else _sanitize_formula(r.get(k))) for k in cols})
 
 
 def write_csvs(res: DrawingResult, out_dir: Path, stem: str) -> list[Path]:
     files = []
-    for name, recs in (("bom", bom_records(res)), ("title_block", title_records(res)),
-                       ("specs", spec_records(res)), ("revisions", revision_records(res)),
-                       ("notes", note_records(res))):
+    groups = [("bom", bom_records(res)), ("title_block", title_records(res)),
+              ("specs", spec_records(res)), ("revisions", revision_records(res)),
+              ("notes", note_records(res))]
+    if res.dimensions:
+        groups.append(("dimensions", dimension_records(res)))
+    for name, recs in groups:
         p = out_dir / f"{stem}_{name}.csv"
         write_csv(recs, p, _default_cols(name, recs))
         files.append(p)
@@ -188,9 +217,9 @@ def write_xlsx(results: Iterable[DrawingResult], path: Path, statuses: dict | No
     extras = []
     for r in results:
         extras += [c for c in r.bom_columns if c not in BOM_STD and c not in extras]
-    bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value",
-                "material", "mass", "mass_kg", "remarks"] + extras + ["confidence", "flags", "page",
-                                                                      "source_file"]
+    bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value", "quantity_unit",
+                "material", "mass", "mass_nominal", "mass_unit", "mass_kg", "mass_verified", "mass_candidate", "remarks"] + extras + [
+                "confidence", "structural_confidence", "flags", "page", "source_file"]
     _sheet(wb.create_sheet("BOM"), bom, bom_cols, flag_col="flags")
     _sheet(wb.create_sheet("Title Block"), [x for r in results for x in title_records(r)],
            ["drawing_number", "field", "value", "normalized", "confidence"])
@@ -200,6 +229,10 @@ def write_xlsx(results: Iterable[DrawingResult], path: Path, statuses: dict | No
            ["drawing_number", "rev", "description", "date", "date_iso", "approved", "page", "confidence"])
     _sheet(wb.create_sheet("Notes"), [x for r in results for x in note_records(r)],
            ["drawing_number", "page", "number", "text", "confidence"])
+    if any(r.dimensions for r in results):
+        _sheet(wb.create_sheet("Dimensions"), [x for r in results for x in dimension_records(r)],
+               ["drawing_number", "page", "type", "text", "nominal", "unit", "tolerance", "prefix", "suffix",
+                "canonical_value", "canonical_unit", "confidence"])
     warn = [{"source_file": Path(r.source_file).name, "warning": w} for r in results for w in r.warnings]
     _sheet(wb.create_sheet("Warnings"), warn, ["source_file", "warning"])
     wb.save(path)
@@ -212,7 +245,11 @@ _HDR_FONT = Font(bold=True, color="FFFFFF")
 _FLAG_FILL = PatternFill("solid", fgColor="FFF2CC")
 _LOW_FILL = PatternFill("solid", fgColor="F8CBAD")
 _THIN = Side(style="thin", color="BFBFBF")
-_HEAD_NAMES = {**BOM_HEAD, "quantity_value": "Qty (numeric)", "mass_kg": "Mass (kg)",
+_HEAD_NAMES = {**BOM_HEAD, "quantity_value": "Qty (numeric)", "quantity_unit": "Qty Unit",
+               "mass_nominal": "Mass Nominal", "mass_unit": "Mass Unit", "mass_kg": "Mass (kg)",
+               "mass_verified": "Mass Verified", "mass_candidate": "Mass Candidate",
+               "canonical_value": "Canonical Value", "canonical_unit": "Canonical Unit",
+               "text_confidence": "Text Confidence", "structural_confidence": "Structural Confidence",
                "drawing_number": "Drawing Number", "drawing_title": "Drawing Title",
                "author_date": "Author / Date", "material_callout": "Material Callout",
                "surface_finish": "Surface Finish", "heat_treatment": "Heat Treatment"}
@@ -247,9 +284,11 @@ def _sheet(ws, records, cols, flag_col=None, low_conf=0.65):
 
 
 def _cell(v):
+    if hasattr(v, "to_dict"):
+        v = v.to_dict()
     if isinstance(v, (list, dict)):
         return json.dumps(v)
-    return v
+    return _sanitize_formula(v)
 
 
 def _columns(records):

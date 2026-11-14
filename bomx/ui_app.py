@@ -5,8 +5,10 @@ It opens in your browser at http://localhost:8501
 """
 from __future__ import annotations
 
+import atexit
 import io
 import json
+import shutil
 import sys
 import tempfile
 import traceback
@@ -27,8 +29,15 @@ from bomx.config import load_config  # noqa: E402
 from bomx.ingest import SUPPORTED_EXT, discover_inputs  # noqa: E402
 from bomx.pipeline import process_file  # noqa: E402
 
-Image.MAX_IMAGE_PIXELS = None
+Image.MAX_IMAGE_PIXELS = 100_000_000
 st.set_page_config(page_title="bomx · Drawing BOM Extractor", page_icon="📐", layout="wide")
+
+def _cleanup_workdir(path: str):
+    try:
+        if path and Path(path).exists():
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
 
 ss = st.session_state
 ss.setdefault("results", {})   # key -> {"res": DrawingResult|None, "error": str|None, "path": str}
@@ -38,7 +47,10 @@ ss.setdefault("nonce", {})     # key -> int  (fresh editor widgets each time a d
 ss.setdefault("verified", {})  # key -> bool
 ss.setdefault("current", None)
 ss.setdefault("seq", 0)        # running input counter (stable ordering across runs)
-ss.setdefault("workdir", tempfile.mkdtemp(prefix="bomx_ui_"))
+if "workdir" not in ss:
+    wd_temp = tempfile.mkdtemp(prefix="bomx_ui_")
+    ss["workdir"] = wd_temp
+    atexit.register(_cleanup_workdir, wd_temp)
 
 TABLES = ["title_block", "bom", "specs", "revisions", "notes"]
 TITLE_KEYS = ["drawing_number", "drawing_title", "revision", "drawn_by", "date", "scale", "projection", "sheet"]
@@ -117,7 +129,7 @@ def _status_icon(status: str) -> str:
 
 
 def _build_xlsx(keys: list[str]) -> bytes:
-    summ, bom, tb, specs, revs, notes, warns = [], [], [], [], [], [], []
+    summ, bom, tb, specs, revs, notes, dims, warns = [], [], [], [], [], [], [], []
     extraction = []
     for k in keys:
         s = _summary(k)
@@ -131,10 +143,11 @@ def _build_xlsx(keys: list[str]) -> bytes:
             for r in _clean(_table(k, name)):
                 r["drawing_number"] = dn
                 target.append(r)
+        dims.extend(ex.dimension_records(res))
         warns += [{"source_file": Path(res.source_file).name, "warning": w} for w in res.warnings]
         extraction.append((s, [r for r in bom if r.get("drawing_number") == dn]))
     bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value", "material",
-                "mass", "mass_kg", "remarks"]
+                "mass", "mass_kg", "mass_verified", "mass_candidate", "remarks"]
     bom_cols += [c for r in bom for c in r if c not in bom_cols and c not in ("confidence", "flags", "page",
                                                                               "source_file")]
     bom_cols = list(dict.fromkeys(bom_cols)) + ["confidence", "flags", "page", "source_file"]
@@ -148,6 +161,8 @@ def _build_xlsx(keys: list[str]) -> bytes:
         ("Revisions", revs, ["drawing_number", "rev", "description", "date", "date_iso", "approved", "page",
                              "confidence"], None),
         ("Notes", notes, ["drawing_number", "page", "number", "text", "confidence"], None),
+        ("Dimensions", dims, ["drawing_number", "page", "type", "text", "nominal", "tolerance", "prefix",
+                              "suffix", "raw", "confidence"], None),
         ("Warnings", warns, ["source_file", "warning"], None),
     ], buf, extraction=extraction)
     return buf.getvalue()
@@ -162,7 +177,10 @@ def _bom_csv(keys: list[str]) -> bytes:
         for r in _clean(_table(k, "bom")):
             r["drawing_number"] = dn
             rows.append(r)
-    return pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
+    df = pd.DataFrame(rows)
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = df[col].map(ex._sanitize_formula)
+    return df.to_csv(index=False).encode("utf-8-sig")
 
 
 def _json(keys: list[str]) -> bytes:
@@ -287,7 +305,14 @@ if run:
     for up in uploads or []:
         d = wd / "uploads"
         d.mkdir(parents=True, exist_ok=True)
-        p = d / up.name
+        target_name = Path(up.name).name
+        stem = Path(target_name).stem
+        ext = Path(target_name).suffix
+        p = d / target_name
+        counter = 1
+        while p.exists() or p in inputs:
+            p = d / f"{stem}_{counter}{ext}"
+            counter += 1
         p.write_bytes(up.getbuffer())
         inputs.append(p)
     if folder.strip():
@@ -302,12 +327,16 @@ if run:
         if vocab is not None:
             vocab_path = wd / "vocab.yaml"
             vocab_path.write_bytes(vocab.getbuffer())
-        cfg = load_config(vocab_path, {"dpi": dpi, "cell_ocr": cell_ocr, "date_order": date_order,
-                                       "ocr_lang": lang.strip() or "eng",
-                                       "tesseract_cmd": tess.strip() or None,
-                                       "cad_layouts": cad_layouts,
-                                       "oda_converter": oda.strip().strip('"') or None,
-                                       "libredwg_path": libredwg.strip().strip('"') or None})
+        ui_overrides = {"dpi": dpi, "cell_ocr": cell_ocr, "date_order": date_order,
+                        "ocr_lang": lang.strip() or "eng",
+                        "tesseract_cmd": tess.strip() or None,
+                        "cad_layouts": cad_layouts,
+                        "oda_converter": oda.strip().strip('"') or None,
+                        "libredwg_path": libredwg.strip().strip('"') or None}
+        if workers > 1:
+            ui_overrides["_parallel"] = True
+            ui_overrides["ocr_workers"] = 1
+        cfg = load_config(vocab_path, ui_overrides)
         bar = st.progress(0.0, text=f"Processing {len(inputs)} drawing(s)…")
         done = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -426,7 +455,7 @@ if res is not None:
 
         def editor(tab, table, **kw):
             df = base[table]
-            hide = [c for c in ("drawing_number", "source_file") if c in df.columns]
+            hide = [c for c in ("drawing_number", "source_file", "quantity_measurement", "mass_measurement") if c in df.columns]
             out = tab.data_editor(
                 df, key=f"ed_{table}_{key}_{nonce}", width="stretch", hide_index=True,
                 column_order=[c for c in df.columns if c not in hide],
@@ -443,7 +472,8 @@ if res is not None:
             editor(t_bom, "bom", num_rows="dynamic", disabled=["check", "confidence", "page"],
                    column_config={"check": st.column_config.TextColumn("", width="small"),
                                   "quantity_value": st.column_config.NumberColumn("qty (num)"),
-                                  "mass_kg": st.column_config.NumberColumn("mass kg", format="%.3f")})
+                                  "mass_kg": st.column_config.NumberColumn("mass kg", format="%.3f"),
+                                  "mass_verified": st.column_config.CheckboxColumn("verified")})
         with t_spec:
             summ = {"Material": s.get("material_callout"), "Surface finish": s.get("surface_finish"),
                     "Heat treatment": s.get("heat_treatment"), "Standards": s.get("standards")}

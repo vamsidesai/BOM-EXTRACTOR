@@ -129,7 +129,7 @@ def test_broken_dxf_reports_error(tmp_path):
     bad.write_text("0\nSECTION\n2\nENTITIES\n0\nLINE\n")
     from bomx.cli import main as cli_main
     out = tmp_path / "out"
-    rc = cli_main(["extract", str(bad), "-o", str(out), "--no-overlay", "-f", "json"])
+    assert cli_main(["extract", str(bad), "-o", str(out), "--no-overlay", "-f", "json"]) == 1
     rep = json.loads((out / "batch_report.json").read_text())
     assert rep["errors"] == 1  # reported, not crashed
 

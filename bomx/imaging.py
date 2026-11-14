@@ -339,9 +339,14 @@ def ocr_cells(clean_gray: np.ndarray, cells: Iterable, dpi: float, lang: str,
         return cell.id, ws
 
     out: dict[int, list[Word]] = {}
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        for cid, ws in ex.map(run, cells):
+    if workers <= 1 or len(cells) <= 1:
+        for cell in cells:
+            cid, ws = run(cell)
             out[cid] = ws
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for cid, ws in ex.map(run, cells):
+                out[cid] = ws
     return out
 
 
@@ -357,24 +362,92 @@ def _score(ws: list[Word]) -> float:
     return sum(w.conf * sum(ch.isalnum() for ch in w.text) for w in ws)
 
 
-def ocr_numeric(clean_gray: np.ndarray, bbox, dpi: float, lang: str) -> Optional[tuple[str, float]]:
-    """Re-read one cell restricted to digits (for item / qty / mass columns)."""
+def ocr_numeric(clean_gray: np.ndarray, bbox, dpi: float, lang: str,
+                orig_text: Optional[str] = None) -> Optional[tuple[str, float]]:
+    """Re-read one cell restricted to digits and decimals (for item / qty / mass columns).
+    Tests multiple image preprocessing variants (scaled, contrast-enhanced, thresholded)
+    to recover faint decimal points that standard single-pass OCR easily drops."""
     inset = max(2, int(dpi * 0.008))
     x0, y0, x1, y1 = int(bbox[0]) + inset, int(bbox[1]) + inset, int(bbox[2]) - inset, int(bbox[3]) - inset
-    crop = clean_gray[max(y0, 0):y1, max(x0, 0):x1]
-    if crop.size == 0:
+    orig_crop = clean_gray[max(y0, 0):y1, max(x0, 0):x1]
+    if orig_crop.size == 0:
         return None
+
     pad = max(8, int(dpi * 0.04))
-    crop = cv2.copyMakeBorder(crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=int(np.median(crop)))
-    best = None
-    for psm in (7, 8):
-        ws = ocr_image(crop, dpi, lang, psm=psm, min_conf=0, whitelist="0123456789.,")
-        if ws:
-            txt = "".join(w.text for w in ws)
-            conf = min(w.conf for w in ws)
-            if best is None or conf > best[1]:
-                best = (txt, conf)
-    return best
+    crop = cv2.copyMakeBorder(orig_crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=int(np.median(orig_crop)))
+
+    # Generate preprocessing variants:
+    # 1. Base padded crop
+    # 2. Scaled up 2x (helps Tesseract preserve small 1-2px dots)
+    # 3. CLAHE contrast enhanced (boosts faint decimal marks near numbers)
+    # 4. Otsu binarized
+    variants = [crop]
+    try:
+        scaled = cv2.resize(crop, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+        variants.append(scaled)
+    except Exception:
+        scaled = crop
+
+    try:
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(4, 4))
+        variants.append(clahe.apply(scaled))
+    except Exception:
+        pass
+
+    try:
+        _, otsu = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        variants.append(otsu)
+    except Exception:
+        pass
+
+    candidates: list[tuple[str, float, bool]] = []
+    for var in variants:
+        var_dpi = dpi * 2.0 if var.shape[0] > crop.shape[0] else dpi
+        for psm in (7, 8):
+            ws = ocr_image(var, var_dpi, lang, psm=psm, min_conf=0, whitelist="0123456789.,")
+            if ws:
+                txt = "".join(w.text for w in ws).strip()
+                if txt:
+                    conf = min(w.conf for w in ws)
+                    has_dot = "." in txt or "," in txt
+                    candidates.append((txt, conf, has_dot))
+
+    if not candidates:
+        return None
+
+    def _digits(s: str) -> str:
+        s_fixed = s.translate(str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "|": "1", "S": "5", "B": "8"}))
+        return re.sub(r"\D", "", s_fixed)
+
+    orig_digits = _digits(orig_text) if orig_text else None
+    if not orig_digits and candidates:
+        # If no explicit orig_text provided, baseline digits come from untransformed base crop
+        orig_digits = _digits(candidates[0][0])
+
+    # Compare OCR outputs:
+    # Do not blindly prefer a decimal candidate unless its digits agree with the original OCR digits.
+    # A preprocessing variant producing a different number must not win simply because it contains a dot.
+    matching_decimal_cands = []
+    for c in candidates:
+        if c[2] and re.search(r"\d+[.,]\d+", c[0]):
+            c_digits = _digits(c[0])
+            if orig_digits and c_digits == orig_digits:
+                matching_decimal_cands.append(c)
+
+    if matching_decimal_cands:
+        matching_decimal_cands.sort(key=lambda x: x[1], reverse=True)
+        return (matching_decimal_cands[0][0], matching_decimal_cands[0][1])
+
+    # If no digit-matching decimal candidate exists, prefer candidates matching orig_digits
+    if orig_digits:
+        matching_cands = [c for c in candidates if _digits(c[0]) == orig_digits]
+        if matching_cands:
+            matching_cands.sort(key=lambda x: x[1], reverse=True)
+            return (matching_cands[0][0], matching_cands[0][1])
+
+    # Fallback to highest confidence candidate among all
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return (candidates[0][0], candidates[0][1])
 
 
 def find_tesseract(explicit: Optional[str] = None) -> Optional[str]:

@@ -112,9 +112,14 @@ def _find_oda(cfg: dict) -> Optional[str]:
         cand.append(w)
     if os.name == "nt":
         for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
-                     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
-            cand += sorted(glob.glob(os.path.join(base, "ODA", "ODAFileConverter*",
-                                                  "ODAFileConverter.exe")), reverse=True)
+                     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                     os.environ.get("LOCALAPPDATA", ""),
+                     str(Path.home() / "AppData" / "Local" / "Programs")):
+            if base:
+                cand += sorted(glob.glob(os.path.join(base, "ODA", "ODAFileConverter*",
+                                                      "ODAFileConverter.exe")), reverse=True)
+                cand += sorted(glob.glob(os.path.join(base, "ODAFileConverter*",
+                                                      "ODAFileConverter.exe")), reverse=True)
     else:
         cand += ["/usr/bin/ODAFileConverter", "/usr/local/bin/ODAFileConverter"]
         cand += sorted(glob.glob("/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter"))
@@ -133,6 +138,17 @@ def _find_dwgread(cfg: dict) -> Optional[str]:
     w = shutil.which("dwgread")
     if w:
         cand.append(Path(w))
+    if os.name == "nt":
+        for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                     os.environ.get("LOCALAPPDATA", ""),
+                     str(Path.home() / "AppData" / "Local" / "Programs"),
+                     str(Path.home() / "Downloads")):
+            if base and Path(base).is_dir():
+                cand += [Path(base) / "LibreDWG" / exe, Path(base) / "libredwg" / exe,
+                         Path(base) / "LibreDWG" / "bin" / exe, Path(base) / "libredwg" / "bin" / exe]
+                cand += [Path(p) for p in glob.glob(os.path.join(base, "libredwg*", exe))]
+                cand += [Path(p) for p in glob.glob(os.path.join(base, "libredwg*", "bin", exe))]
     for c in cand:
         if c.is_file():
             return str(c)
@@ -163,7 +179,9 @@ def _read_dwg(path: Path, cfg: dict):
                 doc, notes = _dwg_via_libredwg(path, loc, cfg)
                 return doc, "dwg", ["DWG read with LibreDWG"] + notes, None
             if name == "aspose":
-                img = _dwg_via_aspose(path)
+                doc, notes_asp, img = _dwg_via_aspose(path)
+                if doc is not None:
+                    return doc, "dwg", ["DWG converted via aspose-cad (vector/text)"] + notes_asp, None
                 return None, "dwg", ["DWG rendered with aspose-cad (no CAD text available - OCR used)"], img
         except Exception as e:  # try the next converter
             log.warning("DWG converter %s failed on %s: %s", name, path.name, e)
@@ -243,13 +261,29 @@ def _dwg_via_libredwg(path: Path, exe: str, cfg: dict):
     return doc, notes
 
 
-def _dwg_via_aspose(path: Path) -> np.ndarray:
+def _dwg_via_aspose(path: Path) -> tuple[Any, list[str], Optional[np.ndarray]]:
     import io
     import aspose.cad as cad
     from aspose.cad import Image as CadImage
     from aspose.cad.imageoptions import CadRasterizationOptions, PngOptions
+    import ezdxf
+    from ezdxf import recover
     img = CadImage.load(str(path))
+    doc = None
+    notes = []
     try:
+        try:
+            dxf_opts_cls = getattr(cad.imageoptions, "DxfOptions", None)
+            if dxf_opts_cls is not None:
+                dxf_buf = io.BytesIO()
+                img.save(dxf_buf, dxf_opts_cls())
+                raw_bytes = dxf_buf.getvalue()
+                if raw_bytes and len(raw_bytes) > 100:
+                    doc, _ = recover.read(raw_bytes)
+                    notes.append("DXF vector/text entities exported via aspose-cad")
+        except Exception as e:
+            log.debug("aspose DXF vector export skipped: %s", e)
+
         w = float(img.width) if img.width > 0 else 2400.0
         h = float(img.height) if img.height > 0 else 1800.0
         tw = 7000.0
@@ -264,9 +298,11 @@ def _dwg_via_aspose(path: Path) -> np.ndarray:
     finally:
         img.close()
     arr = cv2.imdecode(np.frombuffer(buf.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+    if doc is not None:
+        return doc, notes, arr
     if arr is None:
         raise CadError("aspose-cad returned no image")
-    return arr
+    return None, notes, arr
 
 
 # ====================================================================== pages
@@ -301,36 +337,62 @@ def iter_cad_pages(path: Path, dpi: int, max_pixels: int, force_ocr: bool,
                               "rendered filled and read with OCR")
         elif not force_ocr:
             page_notes.append(f"only {len(meaningful)} CAD text entities (text may be exploded "
-                              "to lines) - using OCR")
+                              "to lines) - using OCR supplemented with native CAD text")
         k = kind + ("-traced" if traced else "")
-        yield RawPage(i, img, ppi, native, page_notes, kind=k, label=layout.name,
-                      cad_fields=fields)
+        # Pass words as native_words even if falling back to OCR, so remaining native CAD text isn't lost
+        yield RawPage(i, img, ppi, native if native is not None else (words if words else None),
+                      page_notes, kind=k, label=layout.name, cad_fields=fields)
 
 
 def select_layouts(doc, mode: str = "auto") -> list:
-    """Model space, paper-space layouts, or both. 'auto' follows CAD plotting
-    practice: sheets laid out in paper space are the drawings; otherwise the
-    model space is."""
+    """Model space, paper-space layouts, or both.
+    In 'auto' mode, evaluates entity counts and textual content to select
+    the layout(s) actually containing drawing data (BOM, title block, geometry),
+    avoiding empty/default paper-space templates."""
     msp = doc.modelspace()
+    has_model = len(msp) > 0
+
+    def _content_weight(lay) -> tuple[int, int]:
+        n_text = sum(1 for e in lay if e.dxftype() in TEXT_ENTITIES or (e.dxftype() == "INSERT" and getattr(e, "attribs", None)))
+        n_tot = sum(1 for e in lay if e.dxftype() != "VIEWPORT")
+        return n_text, n_tot
+
+    msp_text, msp_tot = _content_weight(msp) if has_model else (0, 0)
+
     papers = []
+    active_tab = getattr(doc.header, "get", lambda k, d=None: None)("$CTAB") if hasattr(doc, "header") else None
+
     for name in doc.layouts.names_in_taborder():
         lay = doc.layouts.get(name)
         if lay.is_modelspace:
             continue
-        own = sum(1 for e in lay if e.dxftype() != "VIEWPORT")
+        p_text, p_tot = _content_weight(lay)
         vps = [e for e in lay if e.dxftype() == "VIEWPORT" and e.dxf.get("status", 1) not in (0,)]
-        # the first viewport of a layout is the paper itself, not a view into model space
-        shows_model = len(vps) > 1 and len(msp) > 0
-        if own >= 5 or (own > 0 and shows_model):
+        shows_model = len(vps) > 1 and has_model
+        # Ignore empty default paper-space layouts when model space has significant text/content
+        if p_text > 0 or (p_tot >= 5 and (not has_model or msp_tot < 10)) or (shows_model and p_tot > 0):
             papers.append(lay)
-    has_model = len(msp) > 0
+
     if mode == "model":
         return [msp] if has_model else []
     if mode == "paper":
         return papers
     if mode == "all":
         return ([msp] if has_model else []) + papers
-    return papers or ([msp] if has_model else [])
+
+    # 'auto' mode:
+    # If active tab was explicitly set to Model and model space has substantial content, prefer model space
+    if active_tab == "Model" and msp_text > 0:
+        return [msp]
+
+    # If paper layouts were found, verify they aren't dummy templates compared to model space
+    if papers:
+        total_paper_text = sum(_content_weight(lay)[0] for lay in papers)
+        if total_paper_text == 0 and msp_text >= 5:
+            return [msp]
+        return papers
+
+    return [msp] if has_model else []
 
 
 # ====================================================================== render
@@ -386,9 +448,22 @@ def render_layout(doc, layout, dpi: int, max_pixels: int, cfg: dict):
     fe = UniversalFrontend(ctx, pipe, conf)
     try:
         fe.draw_layout(layout, finalize=True)
-    except Exception as e:  # a broken entity must not lose the whole sheet
-        log.warning("CAD render of layout %s incomplete: %s", layout.name, e)
-        notes.append(f"some entities could not be rendered ({type(e).__name__})")
+    except Exception as e:
+        log.warning("CAD render of layout %s failed during batch draw: %s; falling back to entity-by-entity rendering", layout.name, e)
+        failed_entities = 0
+        for entity in layout:
+            try:
+                fe.draw_entity(entity)
+            except Exception:
+                failed_entities += 1
+        try:
+            fe.finalize()
+        except Exception:
+            pass
+        if failed_entities > 0:
+            notes.append(f"warning: {failed_entities} entity/entities could not be rendered ({type(e).__name__}) - layout may be incomplete")
+        else:
+            notes.append(f"layout rendered via entity recovery ({type(e).__name__})")
     player = rec.player()
     records = list(player.recordings())
     if not records and not pipe.texts:
@@ -438,19 +513,24 @@ def render_layout(doc, layout, dpi: int, max_pixels: int, cfg: dict):
     seen = set()
     n_rot = 0
     for t in pipe.texts:
-        if abs(_wrap(t.angle)) >= 5:
+        angle_deg = abs(_wrap(t.angle))
+        if angle_deg >= 5:
             n_rot += 1
-            continue
         xs = (t.pts[:, 0] - x0) * s + _PAD_PX
         ys = (y1 - t.pts[:, 1]) * s + _PAD_PX
-        w = Word(t.text, float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()), 1.0)
+        conf = 0.99
+        if angle_deg >= 5:
+            conf = max(0.88, round(0.98 - 0.08 * (min(angle_deg, 90.0) / 90.0), 3))
+        if any(ch in t.text for ch in ("\ufffd", "?")):
+            conf = max(0.5, conf - 0.2)
+        w = Word(t.text, float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()), conf)
         key = (w.text, round(w.x0), round(w.y0))
         if key in seen:
             continue
         seen.add(key)
         words.append(w)
     if n_rot:
-        notes.append(f"{n_rot} rotated CAD text item(s) (e.g. vertical dimensions) not used")
+        notes.append(f"{n_rot} rotated CAD text item(s) (e.g. vertical dimensions/headers) extracted")
 
     fields = block_attributes(layout, lambda x, y: ((x - x0) * s + _PAD_PX, (y1 - y) * s + _PAD_PX),
                               cfg)

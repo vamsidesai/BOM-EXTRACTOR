@@ -175,10 +175,17 @@ def supplement(doc, data: dict) -> dict[str, int]:
             space = block_layouts.get(owner) if owner else None
             if space is None:
                 continue  # attribs / vertices of other entities
-        if k in TEXTUAL or k == "ATTRIB":
-            stats["text_lost"] += 1
-            continue
         attribs = {"layer": layer_of(o)}
+        if k in TEXTUAL or k == "ATTRIB":
+            try:
+                if _add(space, k, o, attribs, by_handle, block_name, doc):
+                    stats["added"] += 1
+                else:
+                    stats["text_lost"] += 1
+            except Exception as e:
+                log.debug("text recovery failed %s %s: %s", k, h, e)
+                stats["text_lost"] += 1
+            continue
         try:
             if _add(space, k, o, attribs, by_handle, block_name, doc):
                 stats["added"] += 1
@@ -211,6 +218,8 @@ def _same(ent, k: str, o: dict) -> bool:
             return t == "POLYLINE"
         if k == "DIMENSION":
             return t == "DIMENSION"
+        if k in ("TEXT", "MTEXT", "ATTRIB"):
+            return t == k or (k == "ATTRIB" and t == "ATTDEF")
         return t == k or (k in ("SOLID", "TRACE") and t in ("SOLID", "TRACE"))
     except Exception:
         return True
@@ -319,6 +328,31 @@ def _add(space, k, o, attribs, by_handle, block_name, doc) -> bool:
         if not name:
             return False
         space.add_blockref(name, (0, 0, 0), dxfattribs=attribs)
+    elif k == "TEXT":
+        txt = str(o.get("text_value") or o.get("text") or o.get("string") or "")
+        if not txt:
+            return False
+        ins = tuple(float(x) for x in (o.get("ins_pt") or o.get("insertion_pt") or [0, 0, 0])[:3])
+        h = float(o.get("height", 2.5) or 2.5)
+        rot = math.degrees(float(o.get("rotation", 0.0) or 0.0))
+        attribs.update(height=h, rotation=rot)
+        space.add_text(txt, dxfattribs=attribs).set_placement(ins)
+    elif k == "MTEXT":
+        txt = str(o.get("text") or o.get("text_value") or o.get("string") or "")
+        if not txt:
+            return False
+        ins = tuple(float(x) for x in (o.get("ins_pt") or o.get("insertion_pt") or [0, 0, 0])[:3])
+        h = float(o.get("char_height") or o.get("height", 2.5) or 2.5)
+        rot = math.degrees(float(o.get("rotation", 0.0) or 0.0))
+        attribs.update(char_height=h, rotation=rot)
+        space.add_mtext(txt, dxfattribs=attribs).set_location(ins)
+    elif k == "ATTRIB":
+        txt = str(o.get("text_value") or o.get("text") or "")
+        tag = str(o.get("tag") or "TAG")
+        ins = tuple(float(x) for x in (o.get("ins_pt") or [0, 0, 0])[:3])
+        h = float(o.get("height", 2.5) or 2.5)
+        attribs.update(height=h)
+        space.add_attrib(tag, txt, ins, dxfattribs=attribs)
     else:
         return False
     return True
