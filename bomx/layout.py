@@ -292,7 +292,11 @@ def _is_header(flds: set[str], kind: str) -> bool:
         return len(flds) >= 3 and bool(flds & {"item", "quantity"}) and \
             bool(flds & {"part_number", "description", "material"})
     if kind == "revision":
-        return "rev" in flds and len(flds) >= 2 and bool(flds & {"description", "date"})
+        return (
+            "rev" in flds
+            and bool(flds & {"description", "ecn"})
+            and len(flds) >= 2
+        )
     return False
 
 
@@ -841,23 +845,33 @@ def title_block_cells(groups: list[list[Cell]], used: set[int],
     picked: list[Cell] = []
     scored = []
     for g in groups:
-        rem = [c for c in g if c.id not in used]
+        # Check that the group is not already claimed by a BOM or revision table
+        if any(c.id in used for c in g):
+            continue
         flds = set()
-        for c in rem:
+        for c in g:
             if c.words:
                 f, _, _ = match_label_prefix(c.text, title_vocab)
                 if f:
                     flds.add(f)
-        scored.append((len(flds), rem, flds))
+        scored.append((len(flds), g, flds))
 
     # Primary selection: groups with >= 2 fields including a key title field
     for n, rem, flds in sorted(scored, key=lambda x: -x[0]):
         if n >= 2 and (flds & {"drawing_number", "drawing_title", "drawn_by", "scale", "date"}):
             picked.extend(rem)
 
+    # If no multi-field group found, seed with a group containing drawing_number or drawing_title
+    if not picked:
+        for n, rem, flds in sorted(scored, key=lambda x: -x[0]):
+            if flds & {"drawing_number", "drawing_title"}:
+                picked.extend(rem)
+                break
+
     # Spatially associated secondary selection:
     # If a title block was detected, include separate adjacent cell groups that contain
-    # title fields (such as a separate revision-only box containing REV label and value)
+    # title fields (such as drawn_by, date, revision, sheet, scale, checked_by, approved_by)
+    # close to the main title block.
     if picked:
         tb_box = union_bbox([c.bbox for c in picked])
         tb_h = max(tb_box[3] - tb_box[1], 10.0)
@@ -865,18 +879,27 @@ def title_block_cells(groups: list[list[Cell]], used: set[int],
         max_dist_x = max(tb_w * 0.75, 400.0)
         max_dist_y = max(tb_h * 1.5, 400.0)
 
+        title_secondary_fields = {
+            "drawn_by", "date", "revision", "sheet", "scale", "checked_by", "approved_by"
+        }
+
         picked_ids = {c.id for c in picked}
         for n, rem, flds in scored:
             if not rem or any(c.id in picked_ids for c in rem):
                 continue
-            # Include if group contains revision or another title field and sits near the title block
-            if flds & {"revision", "sheet", "scale", "date", "drawn_by", "checked_by", "approved_by"}:
+            # Include if group contains drawn_by, date, revision, sheet, scale, checked_by, or approved_by
+            if flds & title_secondary_fields:
                 g_box = union_bbox([c.bbox for c in rem])
                 dx = max(0.0, max(tb_box[0], g_box[0]) - min(tb_box[2], g_box[2]))
                 dy = max(0.0, max(tb_box[1], g_box[1]) - min(tb_box[3], g_box[3]))
                 if dx <= max_dist_x and dy <= max_dist_y:
                     picked.extend(rem)
                     picked_ids.update(c.id for c in rem)
+                    tb_box = union_bbox([c.bbox for c in picked])
+                    tb_h = max(tb_box[3] - tb_box[1], 10.0)
+                    tb_w = max(tb_box[2] - tb_box[0], 10.0)
+                    max_dist_x = max(tb_w * 0.75, 400.0)
+                    max_dist_y = max(tb_h * 1.5, 400.0)
     return picked
 
 

@@ -767,6 +767,19 @@ def table_to_revisions(t: Table, page: int, date_order: str) -> list[RevisionRow
             iso = parse_date(r.date, date_order)
             if iso:
                 r.extra["date_iso"] = iso
+
+        # A revision entry must have an actual revision identifier.
+        # Do not export title-block author/date text as a revision row.
+        if not r.rev or not re.fullmatch(
+            r"[A-Z0-9][A-Z0-9._/-]{0,7}",
+            r.rev.strip(),
+            re.I,
+        ):
+            continue
+        # A revision identifier alone is not enough to establish a useful row.
+        if not any((r.description, r.date, r.approved, r.extra.get("ecn"))):
+            continue
+
         r.confidence = round(min(confs) if confs else 0.0, 3)
         out.append(r)
     return out
