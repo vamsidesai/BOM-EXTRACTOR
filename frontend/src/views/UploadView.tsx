@@ -3,14 +3,19 @@ import type { DrawingSummaryItem, ExtractionConfig } from '../types/api';
 import { api } from '../services/api';
 import { UploadZone } from '../components/upload/UploadZone';
 import { UploadQueue } from '../components/upload/UploadQueue';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
-import { FileCheck, ShieldAlert, Cpu } from 'lucide-react';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { FileCheck, ShieldAlert, Cpu, History, ArrowRight } from 'lucide-react';
 
 interface UploadViewProps {
   onOpenWorkspace: (id: string) => void;
+  onNavigateHistory: () => void;
 }
 
-export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
+export const UploadView: React.FC<UploadViewProps> = ({
+  onOpenWorkspace,
+  onNavigateHistory,
+}) => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [queue, setQueue] = useState<DrawingSummaryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +31,6 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
 
   useEffect(() => {
     fetchRecent();
-    // Poll queue status while any drawing is processing
     const interval = setInterval(async () => {
       try {
         const items = await api.listDrawings();
@@ -44,7 +48,7 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
     try {
       setIsUploading(true);
       setError(null);
-      const res = await api.uploadDrawings(files, autoExtract, config.force_ocr);
+      await api.uploadDrawings(files, autoExtract, config.force_ocr);
       await fetchRecent();
     } catch (err: any) {
       setError(err.message || 'File upload failed');
@@ -55,13 +59,24 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      <div className="pb-2 border-b border-[#E4EAF2]">
-        <h1 className="text-xl font-bold text-[#172B4D] tracking-tight">
-          Upload Engineering Drawings
-        </h1>
-        <p className="text-xs text-[#64748B] mt-0.5">
-          Ingest multi-page PDF drawing sheets, raster scans (PNG, TIFF, JPG), or 2D CAD layouts (DWG, DXF)
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-[#E4EAF2]">
+        <div>
+          <h1 className="text-xl font-bold text-[#172B4D] tracking-tight">
+            Upload Engineering Drawings
+          </h1>
+          <p className="text-xs text-[#64748B] mt-0.5">
+            Ingest multi-page PDF drawing sheets, raster scans (PNG, TIFF, JPG), or 2D CAD layouts (DWG, DXF)
+          </p>
+        </div>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<History className="w-4 h-4 text-[#2563EB]" />}
+          onClick={onNavigateHistory}
+        >
+          View Extraction History Logs
+        </Button>
       </div>
 
       {error && (
@@ -73,7 +88,7 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
       {/* Upload Zone */}
       <UploadZone onFilesSelected={handleFilesSelected} isUploading={isUploading} />
 
-      {/* Pipeline Technical Specifications Box */}
+      {/* Technical Feature Highlights */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
         <Card className="bg-[#F8FAFC]">
           <div className="p-4 space-y-1.5">
@@ -94,7 +109,7 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
               <span>CAD Vector Tracing</span>
             </div>
             <p className="text-[11px] text-[#64748B]">
-              Parses DWG and DXF layers via LibreDWG and ezdxf, extracting MTEXT, block attributes, and geometry.
+              Parses DWG and DXF layouts via LibreDWG and ezdxf, extracting MTEXT, block attributes, and geometry.
             </p>
           </div>
         </Card>
@@ -103,16 +118,16 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
           <div className="p-4 space-y-1.5">
             <div className="flex items-center gap-2 text-xs font-semibold text-[#172B4D]">
               <ShieldAlert className="w-4 h-4 text-amber-600" />
-              <span>Docsumo Verification</span>
+              <span>Review in History</span>
             </div>
             <p className="text-[11px] text-[#64748B]">
-              Flags ambiguous decimals, missing quantities, and low-confidence title fields for rapid one-click human verification.
+              Open any processed drawing from the Extraction History logs to inspect interactive overlays and verify fields.
             </p>
           </div>
         </Card>
       </div>
 
-      {/* Upload & Extraction Queue */}
+      {/* Recent Uploads Queue */}
       <UploadQueue
         queue={queue}
         onOpenWorkspace={onOpenWorkspace}
@@ -121,4 +136,3 @@ export const UploadView: React.FC<UploadViewProps> = ({ onOpenWorkspace }) => {
     </div>
   );
 };
-

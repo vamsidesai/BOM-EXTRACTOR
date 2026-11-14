@@ -72,14 +72,24 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ drawingId, onBack 
       setFocusedFieldKey(box.field);
       const el = document.getElementById(`tb-field-${box.field}`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (box.category === 'title_block' || box.id.includes('tb_')) {
+      setActiveTab('title_block');
     } else if (box.type === 'bom_row' && box.rowIndex !== undefined) {
       setActiveTab('bom');
       setSelectedRowIndex(box.rowIndex);
+    } else if (box.category === 'bom' || box.id.includes('bom')) {
+      setActiveTab('bom');
     } else if (box.category === 'revision') {
       setActiveTab('revisions');
-    } else if (box.category === 'notes' || box.type === 'spec') {
+    } else if (box.category === 'notes' || box.id.includes('note')) {
+      setActiveTab('notes');
+    } else if (box.type === 'spec' || box.category === 'spec') {
       setActiveTab('specs');
     }
+  };
+
+  const handleSelectSection = (section: 'title_block' | 'bom' | 'notes' | 'revisions' | 'specs') => {
+    setActiveTab(section);
   };
 
   // Locate title field on drawing
@@ -207,7 +217,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ drawingId, onBack 
   const pageCount = drawing.metadata.page_count || 1;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)] overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Workspace Header Toolbar */}
       <WorkspaceHeader
         drawing={drawing}
@@ -231,6 +241,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ drawingId, onBack 
             overlays={currentOverlays}
             highlightedOverlayId={highlightedOverlayId}
             onSelectOverlay={handleSelectOverlay}
+            onSelectSection={handleSelectSection}
+            activeSection={activeTab}
           />
         </div>
 

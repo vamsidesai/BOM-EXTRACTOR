@@ -1,83 +1,89 @@
 import React, { useState, useEffect } from 'react';
-import { Navbar } from './components/common/Navbar';
+import { Sidebar, type NavView } from './components/common/Sidebar';
 import { DashboardView } from './views/DashboardView';
 import { UploadView } from './views/UploadView';
 import { WorkspaceView } from './views/WorkspaceView';
+import { HistoryView } from './views/HistoryView';
 import { api } from './services/api';
 
 export function App() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'upload' | 'workspace'>('dashboard');
+  const [activeNav, setActiveNav] = useState<NavView | 'workspace'>('dashboard');
   const [activeDrawingId, setActiveDrawingId] = useState<string | null>(null);
-  const [activeDrawingName, setActiveDrawingName] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [reviewCount, setReviewCount] = useState<number>(0);
 
-  // If no drawing is selected when switching to workspace, pick the first drawing
-  const handleNavigate = async (view: 'dashboard' | 'upload' | 'workspace') => {
-    if (view === 'workspace' && !activeDrawingId) {
-      try {
-        const drawings = await api.listDrawings();
-        if (drawings.length > 0) {
-          setActiveDrawingId(drawings[0].id);
-          setActiveDrawingName(drawings[0].drawing_number || drawings[0].filename);
-        } else {
-          alert('No drawings available to review. Please upload a drawing first.');
-          setActiveView('upload');
-          return;
-        }
-      } catch (e) {
-        // Fall back
-      }
+  const fetchStats = async () => {
+    try {
+      const stats = await api.getDashboardStats();
+      setReviewCount(stats.review_required_drawings || 0);
+    } catch (e) {
+      // Ignore
     }
-    setActiveView(view);
   };
 
-  const handleSelectDrawing = (id: string) => {
-    setActiveDrawingId(id);
-    setActiveView('workspace');
-  };
-
-  // Sync active drawing name when activeDrawingId changes
   useEffect(() => {
-    if (activeDrawingId) {
-      api.getDrawingDetail(activeDrawingId).then((res) => {
-        if (res?.metadata) {
-          setActiveDrawingName(res.metadata.drawing_number || res.metadata.filename);
-        }
-      }).catch(() => {});
-    }
-  }, [activeDrawingId]);
+    fetchStats();
+  }, []);
+
+  // When user clicks on a drawing in Dashboard or History logs
+  const handleOpenReview = (id: string) => {
+    setActiveDrawingId(id);
+    setActiveNav('workspace');
+  };
+
+  const handleSidebarNavigate = (view: NavView) => {
+    setActiveNav(view);
+  };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col text-[#172B4D]">
-      <Navbar
-        activeView={activeView}
-        onNavigate={handleNavigate}
-        activeDrawingName={activeDrawingName}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#F8FAFC] text-[#172B4D]">
+      {/* Persistent Left Sidebar: Dashboard, Upload, History */}
+      <Sidebar
+        activeView={activeNav}
+        onNavigate={handleSidebarNavigate}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        reviewCount={reviewCount}
       />
 
-      <main className="flex-1">
-        {activeView === 'dashboard' && (
-          <DashboardView
-            onSelectDrawing={handleSelectDrawing}
-            onNavigateUpload={() => setActiveView('upload')}
-          />
+      {/* Main Screen Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        {activeNav === 'dashboard' && (
+          <div className="flex-1 overflow-y-auto">
+            <DashboardView
+              onSelectDrawing={handleOpenReview}
+              onNavigateUpload={() => setActiveNav('upload')}
+            />
+          </div>
         )}
 
-        {activeView === 'upload' && (
-          <UploadView
-            onOpenWorkspace={(id) => {
-              setActiveDrawingId(id);
-              setActiveView('workspace');
-            }}
-          />
+        {activeNav === 'upload' && (
+          <div className="flex-1 overflow-y-auto">
+            <UploadView
+              onOpenWorkspace={handleOpenReview}
+              onNavigateHistory={() => setActiveNav('history')}
+            />
+          </div>
         )}
 
-        {activeView === 'workspace' && activeDrawingId && (
-          <WorkspaceView
-            drawingId={activeDrawingId}
-            onBack={() => setActiveView('dashboard')}
-          />
+        {activeNav === 'history' && (
+          <div className="flex-1 overflow-y-auto">
+            <HistoryView
+              onSelectDrawing={handleOpenReview}
+              onRefreshStats={fetchStats}
+            />
+          </div>
         )}
-      </main>
+
+        {activeNav === 'workspace' && activeDrawingId && (
+          <div className="flex-1 h-full overflow-hidden">
+            <WorkspaceView
+              drawingId={activeDrawingId}
+              onBack={() => setActiveNav('history')}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
