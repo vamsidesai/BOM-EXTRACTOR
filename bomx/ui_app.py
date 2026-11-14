@@ -455,7 +455,7 @@ if res is not None:
 
         def editor(tab, table, **kw):
             df = base[table]
-            hide = [c for c in ("drawing_number", "source_file") if c in df.columns]
+            hide = [c for c in ("drawing_number", "source_file", "quantity_measurement", "mass_measurement") if c in df.columns]
             out = tab.data_editor(
                 df, key=f"ed_{table}_{key}_{nonce}", width="stretch", hide_index=True,
                 column_order=[c for c in df.columns if c not in hide],

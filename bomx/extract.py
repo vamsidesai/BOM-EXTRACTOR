@@ -8,7 +8,7 @@ from datetime import date
 from typing import Optional
 
 from .layout import Table
-from .models import BomRow, Cell, FieldValue, RevisionRow, union_bbox
+from .models import BomRow, Cell, FieldValue, Measurement, RevisionRow, union_bbox
 from .textutil import clean_value, match_label_prefix
 
 # ======================================================================
@@ -291,22 +291,76 @@ def _dist(a, b) -> float:
 # ======================================================================
 # BOM
 # ======================================================================
-_QTY_RX = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(NOS?|PCS?|PC|EA|OFF|SETS?|M|MM|MTR|KG|L|LTR)?\.?\s*$", re.I)
+_NUM_PATTERN = r"(?:\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?|\d{1,3}(?:[.\s]\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)"
+_QTY_RX = re.compile(rf"^\s*({_NUM_PATTERN})\s*(NOS?|PCS?|PC|EA|OFF|SETS?|M|MM|MTR|KG|L|LTR)?\.?\s*$", re.I)
 _AR_RX = re.compile(r"^\s*(A/?R|AS\s+REQ(?:UIRED|D)?|AS\s+REQUIRED|REF)\s*\.?$", re.I)
-_MASS_RX = re.compile(r"(\d+(?:[.,]\d+)?)\s*(KGS?|G|GMS?|GRAMS?|LBS?|POUNDS?|OZ|OUNCES?|T|TONNES?|MG)?\b", re.I)
+_MASS_RX = re.compile(rf"({_NUM_PATTERN})\s*(KGS?|G|GMS?|GRAMS?|LBS?|POUNDS?|OZ|OUNCES?|T|TONNES?|MG)?\b", re.I)
 
 
-def _parse_num_str(s: str) -> Optional[float]:
+def _parse_num_str(s: str, is_quantity: bool = False) -> Optional[float]:
+    """Parse numeric strings supporting grouped thousands separators, decimal points,
+    decimal commas, and mixed formats across engineering drawing locales.
+    """
     s = s.strip()
     if not s:
         return None
+    # Normalize spaces between digits (e.g. ISO 80000 '1 234.50' -> '1234.50')
+    s = re.sub(r"(?<=\d)\s+(?=\d)", "", s)
+
+    # 1. Both comma and dot present: determine decimal by the last occurring separator
     if "," in s and "." in s:
-        if s.rfind(",") > s.rfind("."):
+        last_comma = s.rfind(",")
+        last_dot = s.rfind(".")
+        if last_comma > last_dot:
+            # European style: 1.234,50 or 1.234.567,89
             s = s.replace(".", "").replace(",", ".")
         else:
+            # Standard/US style: 1,234.50 or 1,234,567.89
             s = s.replace(",", "")
-    elif "," in s:
-        s = s.replace(",", ".")
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    # 2. Multiple occurrences of the same separator (unambiguously thousands)
+    if s.count(",") > 1:
+        # e.g. 1,234,567
+        s = s.replace(",", "")
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    if s.count(".") > 1:
+        # e.g. 1.234.567
+        s = s.replace(".", "")
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    # 3. Single comma present
+    if "," in s:
+        parts = s.split(",")
+        if len(parts) == 2:
+            # If digits after comma != 3 (e.g. 1,5 or 0,75 or 12,50 or 1,2345),
+            # it is unambiguously a decimal comma:
+            if len(parts[1]) != 3:
+                s = s.replace(",", ".")
+            else:
+                # Exactly 3 digits after comma (e.g. 1,234 or 10,000):
+                # For quantities (component counts) or numbers with >= 2 leading digits (10,000)
+                # or ending in '000', treat as thousands separator.
+                if is_quantity or parts[1] == "000" or len(parts[0]) >= 2:
+                    s = parts[0] + parts[1]
+                else:
+                    # In standard engineering BOM tables, 1,234 is thousands (1234)
+                    s = parts[0] + parts[1]
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    # 4. Standard integer or float
     try:
         return float(s)
     except ValueError:
@@ -319,29 +373,124 @@ def ocr_digits(s: str) -> str:
                                       "{": "1", "}": "1", "[": "1", "]": "1", "!": "1", "i": "1"}))
 
 
-def to_kg(text: str, default_unit: Optional[str] = None) -> Optional[float]:
+def parse_quantity_measurement(text: str, conf: float = 1.0) -> tuple[Optional[float], Optional[Measurement], list[str]]:
+    """Parse quantity string into nominal value, canonical Measurement, and validation flags."""
     if not text:
-        return None
-    m = _MASS_RX.search(text)
+        return None, None, ["missing_quantity"]
+    raw = text.strip()
+    if _AR_RX.match(raw):
+        meas = Measurement(
+            raw=raw,
+            nominal=None,
+            unit=None,
+            canonical_value=None,
+            canonical_unit="count",
+            measurement_type="quantity",
+            confidence=conf,
+        )
+        return None, meas, ["quantity_as_required"]
+
+    m = _QTY_RX.match(raw)
     if not m:
-        return None
-    v = _parse_num_str(m.group(1))
+        return None, None, ["quantity_not_numeric"]
+
+    v = _parse_num_str(m.group(1), is_quantity=True)
     if v is None:
-        return None
-    u = (m.group(2) or default_unit or "KG").upper()
+        return None, None, ["quantity_not_numeric"]
+
+    unit_str = m.group(2)
+    nominal = int(v) if v.is_integer() else v
+
+    canonical_val = float(nominal)
+    canonical_unit = "count"
+    if unit_str:
+        u_upper = unit_str.upper()
+        if u_upper in ("M", "MTR"):
+            canonical_unit = "m"
+        elif u_upper == "MM":
+            canonical_unit = "m"
+            canonical_val = canonical_val / 1000.0
+        elif u_upper.startswith("KG"):
+            canonical_unit = "kg"
+        elif u_upper in ("L", "LTR"):
+            canonical_unit = "l"
+        else:
+            canonical_unit = "count"
+
+    meas = Measurement(
+        raw=raw,
+        nominal=float(nominal),
+        unit=unit_str,
+        canonical_value=canonical_val,
+        canonical_unit=canonical_unit,
+        measurement_type="quantity",
+        confidence=conf,
+    )
+    return nominal, meas, []
+
+
+def parse_mass_measurement(text: str, default_unit: Optional[str] = None, conf: float = 1.0) -> tuple[Optional[float], Optional[Measurement], list[str]]:
+    """Parse mass string into kg value, canonical Measurement, and validation flags."""
+    if not text:
+        return None, None, []
+    raw = text.strip()
+    m = _MASS_RX.search(raw)
+    if not m:
+        flags = ["unsupported_mass_unit"] if re.search(r"[A-Za-z]{2,}", raw) else ["mass_not_numeric"]
+        return None, None, flags
+
+    v = _parse_num_str(m.group(1), is_quantity=False)
+    if v is None:
+        flags = ["unsupported_mass_unit"] if re.search(r"[A-Za-z]{2,}", raw) else ["mass_not_numeric"]
+        return None, None, flags
+
+    matched_unit = m.group(2)
+    unit_str = matched_unit or default_unit
+    flags = []
+    if not matched_unit and not default_unit:
+        flags.append("mass_unit_assumed_kg")
+        u = "KG"
+    else:
+        u = (matched_unit or default_unit or "KG").upper()
+
     if u.startswith("KG"):
-        return v
-    if u in ("G", "GM", "GMS", "GRAM", "GRAMS"):
-        return v / 1000.0
-    if u.startswith("LB") or u.startswith("POUND"):
-        return v * 0.45359237
-    if u.startswith("OZ") or u.startswith("OUNCE"):
-        return v * 0.0283495
-    if u == "MG":
-        return v / 1_000_000.0
-    if u.startswith("T"):
-        return v * 1000.0
-    return v
+        canonical_val = v
+        canonical_unit = "kg"
+    elif u in ("G", "GM", "GMS", "GRAM", "GRAMS"):
+        canonical_val = v / 1000.0
+        canonical_unit = "kg"
+    elif u.startswith("LB") or u.startswith("POUND"):
+        canonical_val = v * 0.45359237
+        canonical_unit = "kg"
+    elif u.startswith("OZ") or u.startswith("OUNCE"):
+        canonical_val = v * 0.0283495
+        canonical_unit = "kg"
+    elif u == "MG":
+        canonical_val = v / 1_000_000.0
+        canonical_unit = "kg"
+    elif u.startswith("T"):
+        canonical_val = v * 1000.0
+        canonical_unit = "kg"
+    else:
+        canonical_val = v
+        canonical_unit = "kg"
+        flags.append("unsupported_mass_unit")
+
+    meas = Measurement(
+        raw=raw,
+        nominal=v,
+        unit=unit_str,
+        canonical_value=round(canonical_val, 6),
+        canonical_unit=canonical_unit,
+        measurement_type="mass",
+        confidence=conf,
+    )
+    return canonical_val, meas, flags
+
+
+def to_kg(text: str, default_unit: Optional[str] = None) -> Optional[float]:
+    val, _, _ = parse_mass_measurement(text, default_unit=default_unit)
+    return val
 
 
 def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], list[str]]:
@@ -377,32 +526,25 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
                 setattr(r, k, v.replace("$", "S").replace("§", "S"))
         if r.part_number:
             r.part_number = re.sub(r"\s*([-_/.])\s*", r"\1", r.part_number)
+        
+        row_conf = round(min(confs) if confs else 1.0, 3)
         if r.quantity:
             q = r.quantity
-            m = _QTY_RX.match(q)
-            if not m and _QTY_RX.match(ocr_digits(q)):
+            qty_val, qty_meas, q_flags = parse_quantity_measurement(q, conf=row_conf)
+            if qty_meas is None and parse_quantity_measurement(ocr_digits(q))[1] is not None:
                 r.quantity = ocr_digits(q)
-                m = _QTY_RX.match(r.quantity)
-            if m:
-                r.quantity_value = _parse_num_str(m.group(1))
-                if r.quantity_value is not None and r.quantity_value.is_integer():
-                    r.quantity_value = int(r.quantity_value)
-            elif _AR_RX.match(q):
-                r.flags.append("quantity_as_required")
-            else:
-                r.flags.append("quantity_not_numeric")
+                qty_val, qty_meas, q_flags = parse_quantity_measurement(r.quantity, conf=row_conf)
+            r.quantity_value = qty_val
+            r.quantity_measurement = qty_meas
+            r.flags.extend(q_flags)
         else:
             r.flags.append("missing_quantity")
         if r.mass:
             r.mass = re.sub(r"(?<=\d)\s*[:,]\s*(?=\d)", ".", r.mass)
-            r.mass_kg = to_kg(r.mass, mass_unit)
-            if r.mass_kg is None:
-                if re.search(r"[A-Za-z]{2,}", r.mass):
-                    r.flags.append("unsupported_mass_unit")
-                else:
-                    r.flags.append("mass_not_numeric")
-            elif not re.search(r"[A-Za-z]", r.mass) and not mass_unit:
-                r.flags.append("mass_unit_assumed_kg")
+            mass_val, mass_meas, m_flags = parse_mass_measurement(r.mass, default_unit=mass_unit, conf=row_conf)
+            r.mass_kg = mass_val
+            r.mass_measurement = mass_meas
+            r.flags.extend(m_flags)
             if mass_is_total:
                 r.extra["mass_basis"] = "total"
         if not r.part_number and not r.description:

@@ -116,34 +116,76 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def _validate_vocab(cfg: dict, key: str) -> None:
+    val = cfg.get(key)
+    if not isinstance(val, dict):
+        raise ValueError(f"Invalid config '{key}': must be a dictionary mapping field names to lists of synonyms/labels.")
+    for field_name, items in val.items():
+        if not isinstance(field_name, str) or not field_name.strip():
+            raise ValueError(f"Invalid config '{key}': field name must be a non-empty string, got {field_name!r}.")
+        if not isinstance(items, list):
+            raise ValueError(f"Invalid config '{key}' entry for '{field_name}': value must be a list of strings, got {type(items).__name__}.")
+        for item in items:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError(f"Invalid config '{key}' entry for '{field_name}': list items must be non-empty strings, got {item!r}.")
+
+
 def validate_config(cfg: dict) -> dict:
-    """Validate configuration schema, data types, and allowed ranges."""
-    # Numeric ranges
-    if not isinstance(cfg.get("dpi"), (int, float)) or not (50 <= cfg["dpi"] <= 1200):
-        raise ValueError(f"Invalid config 'dpi': {cfg.get('dpi')}. Must be between 50 and 1200.")
-    if not isinstance(cfg.get("max_pixels"), (int, float)) or cfg["max_pixels"] <= 100_000:
-        raise ValueError(f"Invalid config 'max_pixels': {cfg.get('max_pixels')}. Must be >= 100,000.")
-    if not isinstance(cfg.get("min_word_conf"), (int, float)) or not (0 <= cfg["min_word_conf"] <= 100):
-        raise ValueError(f"Invalid config 'min_word_conf': {cfg.get('min_word_conf')}. Must be in range 0..100.")
-    if not isinstance(cfg.get("low_conf_threshold"), (int, float)) or not (0.0 <= cfg["low_conf_threshold"] <= 1.0):
-        raise ValueError(f"Invalid config 'low_conf_threshold': {cfg.get('low_conf_threshold')}. Must be in range 0.0..1.0.")
+    """Validate configuration schema, data types, vocabularies, and allowed ranges."""
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Configuration must be a dictionary, got {type(cfg).__name__}.")
 
-    # Enumerated choices
-    date_order = str(cfg.get("date_order", "dmy")).lower()
+    # 1. Reject unknown configuration keys
+    known_keys = set(DEFAULT_CONFIG.keys())
+    unknown = set(cfg.keys()) - known_keys
+    if unknown:
+        raise ValueError(f"Unknown configuration key(s): {', '.join(sorted(unknown))}")
+
+    # 2. Numeric ranges
+    if isinstance(cfg.get("dpi"), bool) or not isinstance(cfg.get("dpi"), (int, float)) or not (50 <= cfg["dpi"] <= 1200):
+        raise ValueError(f"Invalid config 'dpi': {cfg.get('dpi')}. Must be a number between 50 and 1200.")
+    if isinstance(cfg.get("max_pixels"), bool) or not isinstance(cfg.get("max_pixels"), (int, float)) or cfg["max_pixels"] <= 100_000:
+        raise ValueError(f"Invalid config 'max_pixels': {cfg.get('max_pixels')}. Must be a number >= 100,000.")
+    if isinstance(cfg.get("min_word_conf"), bool) or not isinstance(cfg.get("min_word_conf"), (int, float)) or not (0 <= cfg["min_word_conf"] <= 100):
+        raise ValueError(f"Invalid config 'min_word_conf': {cfg.get('min_word_conf')}. Must be a number in range 0..100.")
+    if isinstance(cfg.get("low_conf_threshold"), bool) or not isinstance(cfg.get("low_conf_threshold"), (int, float)) or not (0.0 <= cfg["low_conf_threshold"] <= 1.0):
+        raise ValueError(f"Invalid config 'low_conf_threshold': {cfg.get('low_conf_threshold')}. Must be a number in range 0.0..1.0.")
+    if isinstance(cfg.get("cad_traced_dpi"), bool) or not isinstance(cfg.get("cad_traced_dpi"), (int, float)) or not (50 <= cfg["cad_traced_dpi"] <= 1200):
+        raise ValueError(f"Invalid config 'cad_traced_dpi': {cfg.get('cad_traced_dpi')}. Must be a number between 50 and 1200.")
+    if isinstance(cfg.get("cad_timeout"), bool) or not isinstance(cfg.get("cad_timeout"), (int, float)) or cfg["cad_timeout"] <= 0:
+        raise ValueError(f"Invalid config 'cad_timeout': {cfg.get('cad_timeout')}. Must be a positive number.")
+    if isinstance(cfg.get("native_min_words"), bool) or not isinstance(cfg.get("native_min_words"), int) or cfg["native_min_words"] < 0:
+        raise ValueError(f"Invalid config 'native_min_words': {cfg.get('native_min_words')}. Must be a non-negative integer.")
+
+    # 3. Boolean settings
+    for b_key in ("cell_ocr", "deskew", "auto_rotate"):
+        if not isinstance(cfg.get(b_key), bool):
+            raise ValueError(f"Invalid config '{b_key}': must be a boolean (true/false), got {type(cfg.get(b_key)).__name__}.")
+
+    # 4. String and optional string paths
+    if not isinstance(cfg.get("ocr_lang"), str) or not cfg["ocr_lang"].strip():
+        raise ValueError(f"Invalid config 'ocr_lang': {cfg.get('ocr_lang')!r}. Must be a non-empty string.")
+    for p_key in ("tesseract_cmd", "oda_converter", "libredwg_path"):
+        val = cfg.get(p_key)
+        if val is not None and (not isinstance(val, str) or not val.strip()):
+            raise ValueError(f"Invalid config '{p_key}': must be null or a non-empty file path string, got {val!r}.")
+
+    # 5. Enumerated choices
+    date_order = str(cfg.get("date_order", "")).lower()
     if date_order not in ("dmy", "mdy", "ymd"):
-        raise ValueError(f"Invalid config 'date_order': '{date_order}'. Allowed: 'dmy', 'mdy', 'ymd'.")
-    cad_layouts = str(cfg.get("cad_layouts", "auto")).lower()
+        raise ValueError(f"Invalid config 'date_order': '{cfg.get('date_order')}'. Allowed: 'dmy', 'mdy', 'ymd'.")
+    cad_layouts = str(cfg.get("cad_layouts", "")).lower()
     if cad_layouts not in ("auto", "model", "paper", "all"):
-        raise ValueError(f"Invalid config 'cad_layouts': '{cad_layouts}'. Allowed: 'auto', 'model', 'paper', 'all'.")
-    dwg_converter = str(cfg.get("dwg_converter", "auto")).lower()
+        raise ValueError(f"Invalid config 'cad_layouts': '{cfg.get('cad_layouts')}'. Allowed: 'auto', 'model', 'paper', 'all'.")
+    dwg_converter = str(cfg.get("dwg_converter", "")).lower()
     if dwg_converter not in ("auto", "oda", "libredwg", "aspose"):
-        raise ValueError(f"Invalid config 'dwg_converter': '{dwg_converter}'. Allowed: 'auto', 'oda', 'libredwg', 'aspose'.")
+        raise ValueError(f"Invalid config 'dwg_converter': '{cfg.get('dwg_converter')}'. Allowed: 'auto', 'oda', 'libredwg', 'aspose'.")
 
-    # Vocabularies
-    if not isinstance(cfg.get("bom_headers"), dict):
-        raise ValueError("Invalid config 'bom_headers': must be a dictionary mapping field names to lists of synonyms.")
-    if not isinstance(cfg.get("title_labels"), dict):
-        raise ValueError("Invalid config 'title_labels': must be a dictionary mapping field names to lists of labels.")
+    # 6. Vocabularies
+    _validate_vocab(cfg, "bom_headers")
+    _validate_vocab(cfg, "title_labels")
+    _validate_vocab(cfg, "revision_headers")
+    _validate_vocab(cfg, "cad_attribute_tags")
 
     return cfg
 
@@ -151,8 +193,15 @@ def validate_config(cfg: dict) -> dict:
 def load_config(path: str | Path | None = None, overrides: dict | None = None) -> dict:
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if path:
-        with open(path, "r", encoding="utf-8") as fh:
-            user = yaml.safe_load(fh) or {}
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Config file not found: {path}")
+        with open(p, "r", encoding="utf-8") as fh:
+            user = yaml.safe_load(fh)
+        if user is None:
+            user = {}
+        elif not isinstance(user, dict):
+            raise ValueError(f"Config file '{path}' must contain a YAML mapping/dictionary, got {type(user).__name__}.")
         _merge(cfg, user)
     if overrides:
         _merge(cfg, {k: v for k, v in overrides.items() if v is not None})

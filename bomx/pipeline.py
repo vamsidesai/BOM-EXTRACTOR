@@ -523,13 +523,39 @@ def build_summary(res: DrawingResult, cfg: dict) -> dict:
         reasons.append(f"{len(flagged)} BOM row(s) flagged")
     if not res.bom:
         reasons.append("no BOM table found")
-    confs = [f.confidence for f in tb.values()] + [r.confidence for r in res.bom]
+
+    # Calculate text confidence independently across recognized text elements
+    tb_confs = [f.confidence for f in tb.values() if f.confidence is not None]
+    bom_text_confs = [r.confidence for r in res.bom if r.confidence is not None]
+    notes_confs = [n["confidence"] for n in res.notes if "confidence" in n and n["confidence"] is not None]
+    rev_confs = [r.confidence for r in res.revisions if r.confidence is not None]
+    dim_confs = [d.confidence for d in res.dimensions if d.confidence is not None]
+    text_confs = tb_confs + bom_text_confs + notes_confs + rev_confs + dim_confs
+
+    s["text_confidence"] = round(sum(text_confs) / len(text_confs), 3) if text_confs else None
+
+    # Structural confidence across BOM table layout
     struct_confs = [r.structural_confidence for r in res.bom]
-    s["mean_confidence"] = round(sum(confs) / len(confs), 3) if confs else None
-    s["text_confidence"] = s["mean_confidence"]
     s["structural_confidence"] = round(sum(struct_confs) / len(struct_confs), 3) if struct_confs else 1.0
-    if s["structural_confidence"] < lc:
-        reasons.append("low structural / column assignment confidence")
+
+    # Overall combined mean confidence
+    all_confs = text_confs + struct_confs
+    s["mean_confidence"] = round(sum(all_confs) / len(all_confs), 3) if all_confs else None
+
+    # Avoid hiding a bad row behind a high average by evaluating critical minimums
+    min_row_struct_conf = min(struct_confs) if struct_confs else 1.0
+    min_row_text_conf = min(bom_text_confs) if bom_text_confs else 1.0
+    s["min_structural_confidence"] = round(min_row_struct_conf, 3)
+    s["min_text_confidence"] = round(min(text_confs), 3) if text_confs else None
+
+    if min_row_struct_conf < lc:
+        reasons.append(f"low structural / column assignment confidence on row (min {min_row_struct_conf:.2f})")
+    elif s["structural_confidence"] < lc:
+        reasons.append(f"low mean structural confidence ({s['structural_confidence']:.2f})")
+
+    if min_row_text_conf < lc:
+        reasons.append(f"low text OCR confidence on row (min {min_row_text_conf:.2f})")
+
     s["review_required"] = bool(reasons)
     s["review_reasons"] = "; ".join(reasons) or None
     return s

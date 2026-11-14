@@ -9,7 +9,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Optional
 
-from .models import BBox, Dimension, Word
+from .models import BBox, Dimension, Measurement, Word
 
 # DimensionCallout is an alias for Dimension model
 DimensionCallout = Dimension
