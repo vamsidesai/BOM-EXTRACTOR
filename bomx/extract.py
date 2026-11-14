@@ -130,6 +130,67 @@ def _neighbour(c: Cell, cells: list[Cell], direction: str, tol: float) -> Option
     return best
 
 
+def _spatial_neighbour(c: Cell, cells: list[Cell], label_ids: set[int], tol: float,
+                       field: str = "") -> Optional[Cell]:
+    """Find a neighbouring value cell using bounded spatial search when strict ruling alignment fails.
+
+    Searches first to the right, then below:
+    - Candidate is not the label cell itself and not another recognised label
+    - Candidate contains words/text
+    - Candidate is within bounded distance (tol * 4.5 horizontally, tol * 3.5 vertically)
+    - Vertical overlap or center alignment for right neighbours; horizontal overlap or center alignment below
+    - Value satisfies _valid(field, val)
+    """
+    max_h_tol = max(tol * 4.5, 30.0)
+    overlap_tol = max(tol, 5.0)
+    c_mid_y = (c.y0 + c.y1) / 2.0
+
+    # 1. Look right: closest value cell to the right with vertical overlap/alignment
+    best_right, best_right_score = None, float("inf")
+    for o in cells:
+        if o is c or o.id in label_ids or not o.words:
+            continue
+        h_gap = o.x0 - c.x1
+        if -overlap_tol <= h_gap <= max_h_tol:
+            ov = min(c.y1, o.y1) - max(c.y0, o.y0)
+            v_shift = abs(c_mid_y - (o.y0 + o.y1) / 2.0)
+            if ov > 0.15 * min(c.h, o.h) or v_shift <= max(c.h, o.h) * 0.85:
+                txt = clean_value(o.text)
+                if not txt:
+                    continue
+                if field and not _valid(field, txt):
+                    continue
+                score = max(0.0, h_gap) + v_shift * 1.5
+                if score < best_right_score:
+                    best_right, best_right_score = o, score
+
+    if best_right is not None:
+        return best_right
+
+    # 2. Look below: closest value cell below with horizontal overlap/alignment
+    max_v_tol = max(tol * 3.5, 25.0)
+    c_mid_x = (c.x0 + c.x1) / 2.0
+    best_below, best_below_score = None, float("inf")
+    for o in cells:
+        if o is c or o.id in label_ids or not o.words:
+            continue
+        v_gap = o.y0 - c.y1
+        if -overlap_tol <= v_gap <= max_v_tol:
+            ov = min(c.x1, o.x1) - max(c.x0, o.x0)
+            h_shift = abs(c_mid_x - (o.x0 + o.x1) / 2.0)
+            if ov > 0.15 * min(c.w, o.w) or h_shift <= max(c.w, o.w) * 0.85:
+                txt = clean_value(o.text)
+                if not txt:
+                    continue
+                if field and not _valid(field, txt):
+                    continue
+                score = max(0.0, v_gap) + h_shift * 1.5
+                if score < best_below_score:
+                    best_below, best_below_score = o, score
+
+    return best_below
+
+
 def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str,
                       date_order: str = "dmy") -> dict[str, FieldValue]:
     tol = dpi * 0.035
@@ -146,16 +207,22 @@ def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str
                 continue
             val = clean_value(val)
             src_cell = c
-            if not val:
+            if not val or not _valid(f, val):
                 nb = None
                 for d in ("right", "below"):
                     n = _neighbour(c, cells, d, tol)
                     if n is not None and n.words and n.id not in label_ids:
-                        nb = n
-                        break
+                        val_candidate = clean_value(n.text)
+                        if val_candidate and _valid(f, val_candidate):
+                            nb = n
+                            break
                 if nb is None:
-                    continue
-                val, src_cell = clean_value(nb.text), nb
+                    nb = _spatial_neighbour(c, cells, label_ids, tol, f)
+                if nb is None:
+                    if not val or not _valid(f, val):
+                        continue
+                else:
+                    val, src_cell = clean_value(nb.text), nb
             fv = FieldValue(val, round(src_cell.conf, 3), src_cell.bbox, raw=val)
             cands[f].append((fv, c))
 
@@ -166,6 +233,8 @@ def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str
             continue
         if f == "drawing_title":
             out[f] = max(lst, key=lambda x: len(x[0].value or ""))[0]
+        elif f == "revision":
+            out[f] = max(lst, key=lambda x: x[0].confidence)[0]
         else:
             out[f] = lst[0][0]
 
@@ -185,8 +254,12 @@ def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str
             src = next((c for c in cells if c.bbox == v.bbox), None)
             if src is not None:
                 n = _neighbour(src, cells, "right", tol)
+                if n is None or not (n.words and looks_like_date(n.text)):
+                    n = _spatial_neighbour(src, cells, label_ids, tol, "date")
                 if n is not None and n.words and looks_like_date(n.text):
                     key = pf.replace("_by", "_date")
+                    out.setdefault(key, FieldValue(clean_value(n.text), round(n.conf, 3), n.bbox,
+                                                   raw=n.text))
                     out.setdefault(key, FieldValue(clean_value(n.text), round(n.conf, 3), n.bbox,
                                                    raw=n.text))
 
@@ -259,7 +332,7 @@ def normalise_title_fields(out: dict[str, FieldValue], date_order: str = "dmy") 
             fv.normalized = ("THIRD ANGLE" if ("THIRD" in u or "3RD" in u)
                              else "FIRST ANGLE" if ("FIRST" in u or "1ST" in u) else None)
         elif k == "revision":
-            fv.normalized = re.sub(r"^REV(?:ISION)?\.?\s*", "", fv.value.upper()).strip()
+            fv.normalized = re.sub(r"^REV(?:ISION)?\.?\s*[:#]?\s*", "", fv.value.upper()).strip()
         elif k == "weight":
             fv.normalized = to_kg(fv.value)
 
@@ -270,7 +343,17 @@ def _valid(f: str, v: Optional[str]) -> bool:
     if f == "drawing_number":
         return bool(re.search(r"\d", v)) and len(v) <= 40
     if f == "revision":
-        return len(v) <= 8
+        v_clean = v.strip()
+        if len(v_clean) > 8 or "\n" in v_clean:
+            return False
+        if re.fullmatch(r"REV(?:ISION)?\.?", v_clean, re.I):
+            return False
+        if re.search(r"\b(?:NOTE|GENERAL|SHEET|TOLERANCE|UNLESS|ZONE|TITLE)\b", v_clean, re.I):
+            return False
+        v_val = re.sub(r"^REV(?:ISION)?\.?\s*[:#]?\s*", "", v_clean, flags=re.I).strip()
+        if not v_val or bool(re.search(r"[^A-Za-z0-9\-./]", v_val)):
+            return False
+        return True
     if f in ("date",) or f.endswith("_date"):
         return parse_date(v) is not None
     if f == "scale":
@@ -587,22 +670,31 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
                 except Exception:
                     pass
 
+            has_separator_fix = False
             if is_suspicious and not re_ocr_resolved:
                 # If separator had colon or apostrophe, parse candidate with dot but flag as ambiguous
                 if re.search(r"(?<=\d)\s*[:;']\s*(?=\d)", mass_to_parse):
                     mass_to_parse = re.sub(r"(?<=\d)\s*[:;']\s*(?=\d)", ".", mass_to_parse)
                     r.flags.append("mass_decimal_ambiguous")
+                    has_separator_fix = True
                 else:
                     # Integer mass that is suspicious (e.g. 210 kg) without decimal
                     r.flags.append("mass_decimal_ambiguous")
 
             mass_val, mass_meas, m_flags = parse_mass_measurement(mass_to_parse, default_unit=mass_unit, conf=row_conf)
-            # Crucial: preserve original OCR text in r.mass and mass_meas.raw!
+            # Crucial: preserve original OCR text in r.mass
             r.mass = raw_mass
-            if mass_meas:
-                mass_meas.raw = raw_mass
-            r.mass_kg = mass_val
-            r.mass_measurement = mass_meas
+            if "mass_decimal_ambiguous" in r.flags and not has_separator_fix and not re_ocr_resolved:
+                # Unverified integer mass: do not accept or confirm it
+                r.mass_kg = None
+                r.mass_measurement = None
+                r.mass_verified = False
+            else:
+                if mass_meas:
+                    mass_meas.raw = raw_mass
+                r.mass_kg = mass_val
+                r.mass_measurement = mass_meas
+                r.mass_verified = (mass_val is not None and "mass_decimal_ambiguous" not in r.flags)
             r.flags.extend(m_flags)
             if mass_is_total:
                 r.extra["mass_basis"] = "total"

@@ -143,8 +143,14 @@ class BomRow:
     flags: list[str] = field(default_factory=list)
     quantity_measurement: Optional[Measurement] = None
     mass_measurement: Optional[Measurement] = None
+    mass_verified: bool = False
 
     def __post_init__(self):
+        if self.mass_kg is not None and "mass_decimal_ambiguous" not in self.flags:
+            self.mass_verified = True
+        else:
+            self.mass_verified = False
+
         if self.quantity_measurement is None and (self.quantity_value is not None or self.quantity):
             raw = self.quantity or (str(self.quantity_value) if self.quantity_value is not None else "")
             nom = float(self.quantity_value) if self.quantity_value is not None else None
@@ -185,7 +191,7 @@ class BomRow:
                 confidence=self.confidence
             )
 
-        if self.mass_measurement is None and (self.mass_kg is not None or self.mass):
+        if self.mass_measurement is None and (self.mass_kg is not None or self.mass) and "mass_decimal_ambiguous" not in self.flags:
             raw = self.mass or (f"{self.mass_kg} kg" if self.mass_kg is not None else "")
             nom = None
             unit = None

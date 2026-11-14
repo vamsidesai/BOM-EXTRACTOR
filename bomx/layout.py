@@ -618,16 +618,18 @@ def _infer_columns(t: "Table", vocab) -> None:
 
         head_upper = col.header.upper()
         has_mass_header = bool(re.search(r"\b(MASS|WEIGHT|WT|GEWICHT|MASSE|POIDS|PESO)\b", head_upper))
+        has_unit_header = bool(re.search(r"[\(\[]?\b(KG|KGS|G|GMS|LBS?)\b[\)\]]?", head_upper))
+        is_mat_data = sum(1 for v in vals if find_specs(v, "bom", categories={"material"})) / len(vals) >= 0.5
 
-        if "mass" not in have and (
-            has_mass_header or
+        if "material" not in have and (is_mat_data or (re.search(r"\bMATERIAL\b", head_upper) and not frac(_MASS_NUM_RX) >= 0.8)):
+            guess = "material"
+        elif "mass" not in have and not is_mat_data and (
+            ((has_mass_header or has_unit_header) and frac(_MASS_NUM_RX) >= 0.5) or
             (frac(_MASS_NUM_RX) >= 0.80 and (any("." in v or "," in v for v in vals) or any(re.search(r"\b(?:kg|lbs?|gms?)\b", v, re.I) for v in vals)))
         ):
             guess = "mass"
         elif frac(_INT_RX) >= 0.85 and "quantity" not in have and "item" in have:
             guess = "quantity"
-        elif "material" not in have and sum(1 for v in vals if find_specs(v, "bom", categories={"material"})) / len(vals) >= 0.6:
-            guess = "material"
         elif "part_number" not in have and frac(_PN_RX) >= 0.75:
             guess = "part_number"
         if guess:
@@ -847,9 +849,34 @@ def title_block_cells(groups: list[list[Cell]], used: set[int],
                 if f:
                     flds.add(f)
         scored.append((len(flds), rem, flds))
+
+    # Primary selection: groups with >= 2 fields including a key title field
     for n, rem, flds in sorted(scored, key=lambda x: -x[0]):
         if n >= 2 and (flds & {"drawing_number", "drawing_title", "drawn_by", "scale", "date"}):
             picked.extend(rem)
+
+    # Spatially associated secondary selection:
+    # If a title block was detected, include separate adjacent cell groups that contain
+    # title fields (such as a separate revision-only box containing REV label and value)
+    if picked:
+        tb_box = union_bbox([c.bbox for c in picked])
+        tb_h = max(tb_box[3] - tb_box[1], 10.0)
+        tb_w = max(tb_box[2] - tb_box[0], 10.0)
+        max_dist_x = max(tb_w * 0.75, 400.0)
+        max_dist_y = max(tb_h * 1.5, 400.0)
+
+        picked_ids = {c.id for c in picked}
+        for n, rem, flds in scored:
+            if not rem or any(c.id in picked_ids for c in rem):
+                continue
+            # Include if group contains revision or another title field and sits near the title block
+            if flds & {"revision", "sheet", "scale", "date", "drawn_by", "checked_by", "approved_by"}:
+                g_box = union_bbox([c.bbox for c in rem])
+                dx = max(0.0, max(tb_box[0], g_box[0]) - min(tb_box[2], g_box[2]))
+                dy = max(0.0, max(tb_box[1], g_box[1]) - min(tb_box[3], g_box[3]))
+                if dx <= max_dist_x and dy <= max_dist_y:
+                    picked.extend(rem)
+                    picked_ids.update(c.id for c in rem)
     return picked
 
 
@@ -905,24 +932,48 @@ def text_title_cells(words: list[Word], vocab: dict[str, list[str]], dpi: float,
     flds = {lab[i][1] for i in best}
     if len(flds) < min_fields or not flds & {"drawing_number", "drawing_title"}:
         return []
+
+    # Associate nearby isolated REV label/value if it sat slightly outside the initial cluster link
+    if "revision" not in flds:
+        best_bb = union_bbox([lab[i][0].bbox for i in best])
+        for idx in range(n):
+            if idx not in best and lab[idx][1] == "revision":
+                rev_bb = lab[idx][0].bbox
+                dx = max(0.0, max(best_bb[0], rev_bb[0]) - min(best_bb[2], rev_bb[2]))
+                dy = max(0.0, max(best_bb[1], rev_bb[1]) - min(best_bb[3], rev_bb[3]))
+                if dx <= dpi * 3.5 and dy <= dpi * 2.5:
+                    best.append(idx)
+                    flds.add("revision")
+                    break
+
     used = {id(lab[i][0]) for i in best}
     out = []
     for i in best:
         sg, f, rest = lab[i]
         ws = list(sg.words)
-        if not rest:  # value on the line below, overlapping the label horizontally
+        if not rest:
             x0, y0, x1, y1 = sg.bbox
             h = max(y1 - y0, 1.0)
-            below = [o for o in segs if id(o) not in used and o.bbox[1] > y1 - 0.2 * h
-                     and o.bbox[1] - y1 <= 2.5 * h
-                     and min(x1 + 4 * h, o.bbox[2]) - max(x0 - h, o.bbox[0]) > 0]
-            below = [o for o in below if not match_label_prefix(o.text, vocab)[0]]
-            if below:
-                v = min(below, key=lambda o: (o.bbox[1], abs(o.bbox[0] - x0)))
+            # Try right neighbour on the same line first (e.g. 'REV: 1' or 'REV' [gap] 'A')
+            right = [o for o in segs if id(o) not in used
+                     and o.bbox[0] >= x0 and o.bbox[0] - x1 <= 4.0 * h
+                     and abs((o.bbox[1] + o.bbox[3]) - (y0 + y1)) <= 1.2 * h]
+            right = [o for o in right if not match_label_prefix(o.text, vocab)[0]]
+            if right:
+                v = min(right, key=lambda o: o.bbox[0])
                 used.add(id(v))
-                # a value is one phrase: stop at the first wide gap (a stray mark
-                # or the next column's text can sit closer than a segment gap)
                 ws += list(split_segments(v, gap_factor=1.2)[0].words)
+            else:
+                # Value on the line below, overlapping the label horizontally
+                below = [o for o in segs if id(o) not in used and o.bbox[1] > y1 - 0.2 * h
+                         and o.bbox[1] - y1 <= 2.5 * h
+                         and min(x1 + 4 * h, o.bbox[2]) - max(x0 - h, o.bbox[0]) > 0]
+                below = [o for o in below if not match_label_prefix(o.text, vocab)[0]]
+                if below:
+                    v = min(below, key=lambda o: (o.bbox[1], abs(o.bbox[0] - x0)))
+                    used.add(id(v))
+                    # a value is one phrase: stop at the first wide gap
+                    ws += list(split_segments(v, gap_factor=1.2)[0].words)
         bb = union_bbox([w.bbox for w in ws])
         out.append(Cell(*bb, words=ws, id=next(_VID)))
     return out
