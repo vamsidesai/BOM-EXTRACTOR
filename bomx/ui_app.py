@@ -129,7 +129,7 @@ def _status_icon(status: str) -> str:
 
 
 def _build_xlsx(keys: list[str]) -> bytes:
-    summ, bom, tb, specs, revs, notes, warns = [], [], [], [], [], [], []
+    summ, bom, tb, specs, revs, notes, dims, warns = [], [], [], [], [], [], [], []
     extraction = []
     for k in keys:
         s = _summary(k)
@@ -143,6 +143,7 @@ def _build_xlsx(keys: list[str]) -> bytes:
             for r in _clean(_table(k, name)):
                 r["drawing_number"] = dn
                 target.append(r)
+        dims.extend(ex.dimension_records(res))
         warns += [{"source_file": Path(res.source_file).name, "warning": w} for w in res.warnings]
         extraction.append((s, [r for r in bom if r.get("drawing_number") == dn]))
     bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value", "material",
@@ -160,6 +161,8 @@ def _build_xlsx(keys: list[str]) -> bytes:
         ("Revisions", revs, ["drawing_number", "rev", "description", "date", "date_iso", "approved", "page",
                              "confidence"], None),
         ("Notes", notes, ["drawing_number", "page", "number", "text", "confidence"], None),
+        ("Dimensions", dims, ["drawing_number", "page", "type", "text", "nominal", "tolerance", "prefix",
+                              "suffix", "raw", "confidence"], None),
         ("Warnings", warns, ["source_file", "warning"], None),
     ], buf, extraction=extraction)
     return buf.getvalue()
@@ -174,7 +177,10 @@ def _bom_csv(keys: list[str]) -> bytes:
         for r in _clean(_table(k, "bom")):
             r["drawing_number"] = dn
             rows.append(r)
-    return pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
+    df = pd.DataFrame(rows)
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = df[col].map(ex._sanitize_formula)
+    return df.to_csv(index=False).encode("utf-8-sig")
 
 
 def _json(keys: list[str]) -> bytes:

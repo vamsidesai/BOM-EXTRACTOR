@@ -672,8 +672,6 @@ def _band_to_values(band: list[Cell], cols: list[Column]) -> dict[str, TableCell
     for col in cols:
         vals.setdefault(col.key, TableCellValue("", 1.0, (col.x0, 0, col.x1, 0), struct_conf=1.0))
     return vals
-        vals.setdefault(col.key, TableCellValue("", 1.0, (col.x0, 0, col.x1, 0)))
-    return vals
 
 
 def _slug(text: str) -> str:

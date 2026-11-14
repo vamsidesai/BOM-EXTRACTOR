@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environment / IDE
+.venv/
+venv/
+ENV/
+.env
+.idea/
+.vscode/
+
+# Temporary / outputs
+out/
+bomx_output/
+*.log
