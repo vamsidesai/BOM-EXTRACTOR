@@ -175,19 +175,27 @@ def cmd_check(a) -> int:
 
 def cmd_ui(a) -> int:
     try:
-        import streamlit  # noqa: F401
+        import uvicorn
+        import fastapi
     except ImportError:
-        print("The UI needs Streamlit:  pip install streamlit pandas", file=sys.stderr)
+        print("The modern UI needs fastapi and uvicorn:  pip install fastapi uvicorn", file=sys.stderr)
         return 1
-    import subprocess
-    app = Path(__file__).with_name("ui_app.py")
-    cmd = [sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(a.port),
-           "--browser.gatherUsageStats", "false", "--server.maxUploadSize", "1000"]
-    if a.no_browser:
-        cmd += ["--server.headless", "true"]
-    print(f"Starting bomx UI at http://localhost:{a.port}  (Ctrl+C to stop)")
+    import webbrowser
+    import threading
+
+    url = f"http://localhost:{a.port}"
+    print(f"Starting modern BOMX Web UI (Docsumo-style) at {url}  (Ctrl+C to stop)")
+
+    if not a.no_browser:
+        def _open():
+            import time
+            time.sleep(1.2)
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+
     try:
-        return subprocess.call(cmd)
+        uvicorn.run("backend.main:app", host="0.0.0.0", port=a.port, log_level="info")
+        return 0
     except KeyboardInterrupt:
         return 0
 

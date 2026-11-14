@@ -399,7 +399,7 @@ if res is None:
         st.code(entry["error"])
 
 if res is not None:
-    # fresh editor widgets whenever a drawing is (re)opened, seeded with its latest edits
+    # Fresh editor widgets whenever a drawing is (re)opened, seeded with its latest edits.
     if ss.current != key:
         ss.current = key
         ss.base[key] = {t: _table(key, t).copy() for t in TABLES}
@@ -408,82 +408,183 @@ if res is not None:
     nonce = ss.nonce[key]
     s = summaries[key]
 
-    h1, h2 = st.columns([3, 1])
-    h1.markdown(f"### {s.get('drawing_number') or key} — {s.get('drawing_title') or ''}")
-    h1.caption(f"Rev {s.get('revision') or '?'} · {s.get('author_date') or ''} · Scale {s.get('scale') or '?'} · "
-               f"{s.get('projection') or ''} · {s['pages']} page(s) · {s['input_type']} · "
-               f"{res.processing_seconds:.1f}s")
-    ss.verified[key] = h2.toggle("✅ Verified", value=ss.verified.get(key, False),
-                                 help="Tick after checking this drawing against the overlay")
-    if s.get("review_reasons") and not ss.verified.get(key):
-        st.warning(f"Check: {s['review_reasons']}")
+    # Docsumo-inspired review workspace: document first, extracted data beside it.
+    st.markdown(
+        """
+        <style>
+        .block-container {padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1600px;}
+        [data-testid="stMetric"] {background:#F7F9FC;border:1px solid #E4EAF2;padding:12px 14px;border-radius:10px;}
+        [data-testid="stMetricLabel"] {color:#526477;}
+        [data-testid="stMetricValue"] {color:#172B4D;}
+        .bomx-muted {color:#64748B;font-size:0.82rem;}
+        .bomx-field {padding:9px 0;border-bottom:1px solid #E8EDF3;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    left, right = st.columns([1.05, 1])
+    head_left, head_right = st.columns([4, 1])
+    with head_left:
+        st.markdown(f"### {s.get('drawing_number') or key}")
+        st.caption(
+            f"{s.get('drawing_title') or 'Untitled drawing'} · {Path(key).suffix.upper().lstrip('.')} · "
+            f"{s['pages']} page(s) · extracted in {res.processing_seconds:.1f}s"
+        )
+    with head_right:
+        ss.verified[key] = st.toggle(
+            "Verified", value=ss.verified.get(key, False),
+            help="Mark this drawing as reviewed after checking the extracted data against the source.",
+        )
+
+    # Confidence is an average of available extraction confidence values, not a model-generated score.
+    confidence_values = []
+    for table_name in TABLES:
+        df_conf = base[table_name]
+        if "confidence" in df_conf.columns:
+            for value in df_conf["confidence"].tolist():
+                try:
+                    if pd.notna(value):
+                        confidence_values.append(max(0.0, min(1.0, float(value))))
+                except (TypeError, ValueError):
+                    pass
+    overall_conf = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Title block", f"{len(base['title_block'])}/{len(TITLE_KEYS)} fields")
+    m2.metric("BOM items", len(base["bom"]))
+    m3.metric("Revision entries", len(base["revisions"]))
+    m4.metric("Notes", len(base["notes"]))
+    m5.metric("Avg. confidence", f"{overall_conf:.0%}" if confidence_values else "—")
+
+    if s.get("review_reasons") and not ss.verified.get(key):
+        st.warning(f"Needs attention: {s['review_reasons']}")
+    elif ss.verified.get(key):
+        st.success("This drawing has been marked as verified.")
+
+    def editor(tab, table, **kw):
+        df = base[table]
+        hide = [c for c in ("drawing_number", "source_file", "quantity_measurement", "mass_measurement") if c in df.columns]
+        out = tab.data_editor(
+            df, key=f"ed_{table}_{key}_{nonce}", width="stretch", hide_index=True,
+            column_order=[c for c in df.columns if c not in hide],
+            column_config={
+                "confidence": st.column_config.ProgressColumn(
+                    "confidence", min_value=0.0, max_value=1.0, format="%.0%"
+                ),
+                **kw.pop("column_config", {}),
+            }, **kw
+        )
+        ss.edited.setdefault(key, {})[table] = out
+        return out
+
+    # Main two-panel workspace.
+    left, right = st.columns([1.12, 0.88], gap="large")
 
     with left:
+        st.subheader("Source drawing")
         pages = [p for p in res.pages if p.overlay_path and Path(p.overlay_path).exists()]
         if pages:
-            pc1, pc2 = st.columns(2)
-            pi = pc1.selectbox("Page", range(len(pages)), format_func=lambda i: f"Page {pages[i].index + 1}") \
-                if len(pages) > 1 else 0
+            pc1, pc2 = st.columns([1, 1])
+            pi = pc1.selectbox(
+                "Page", range(len(pages)),
+                format_func=lambda i: f"Page {pages[i].index + 1}",
+            ) if len(pages) > 1 else 0
             page = pages[pi]
             kinds = ["Full page"] + list(dict.fromkeys(r.kind for r in page.regions))
             names = {"title_block": "Title block", "bom": "BOM", "revision": "Revisions", "notes": "Notes"}
-            zoom = pc2.selectbox("Zoom to", kinds, format_func=lambda k: names.get(k, k))
+            zoom = pc2.selectbox("Highlight region", kinds, format_func=lambda k: names.get(k, k))
             img = Image.open(page.overlay_path)
             if zoom != "Full page":
-                sc = img.width / page.width
                 boxes = [r.bbox for r in page.regions if r.kind == zoom]
-                x0 = min(b[0] for b in boxes) * sc
-                y0 = min(b[1] for b in boxes) * sc
-                x1 = max(b[2] for b in boxes) * sc
-                y1 = max(b[3] for b in boxes) * sc
-                m = 40
-                img = img.crop((max(0, x0 - m), max(0, y0 - m * 2), min(img.width, x1 + m), min(img.height, y1 + m)))
+                if boxes:
+                    scale = img.width / page.width
+                    x0 = min(b[0] for b in boxes) * scale
+                    y0 = min(b[1] for b in boxes) * scale
+                    x1 = max(b[2] for b in boxes) * scale
+                    y1 = max(b[3] for b in boxes) * scale
+                    margin = 40
+                    img = img.crop((
+                        max(0, x0 - margin), max(0, y0 - margin * 2),
+                        min(img.width, x1 + margin), min(img.height, y1 + margin),
+                    ))
             st.image(img, width="stretch")
-            st.caption("Blue = title block · Green = BOM · Orange = revisions · Purple = notes · "
-                       "boxed text = material / finish / heat-treatment callouts · CHECK = BOM row to verify")
+            st.caption(
+                "Blue: title block · Green: BOM · Orange: revisions · Purple: notes · "
+                "boxed regions: material / finish / heat-treatment callouts"
+            )
+        else:
+            st.info("No drawing overlay is available for this file.")
+
         if res.warnings:
-            with st.expander(f"Warnings ({len(res.warnings)})"):
-                for w in res.warnings:
-                    st.write("• " + w)
+            with st.expander(f"Processing warnings ({len(res.warnings)})"):
+                for warning in res.warnings:
+                    st.write(f"• {warning}")
 
     with right:
-        t_tb, t_bom, t_spec, t_rev, t_notes = st.tabs(["Title block", f"BOM ({len(base['bom'])})", "Material & specs",
-                                                       "Revisions", "Notes"])
-        conf_col = st.column_config.ProgressColumn("confidence", min_value=0.0, max_value=1.0, format="%.2f")
+        st.subheader("Extracted drawing information")
+        title_df = base["title_block"]
+        if title_df.empty:
+            st.info("No title-block fields were extracted.")
+        else:
+            for _, field_row in title_df.iterrows():
+                field_name = str(field_row.get("field") or "Field")
+                field_value = field_row.get("value")
+                field_value = "—" if pd.isna(field_value) or not str(field_value).strip() else str(field_value)
+                try:
+                    field_conf = max(0.0, min(1.0, float(field_row.get("confidence") or 0)))
+                except (TypeError, ValueError):
+                    field_conf = 0.0
+                label_col, value_col, confidence_col = st.columns([1.0, 2.0, 0.85])
+                label_col.caption(field_name.replace("_", " ").title())
+                value_col.markdown(f"**{field_value}**")
+                confidence_col.progress(field_conf, text=f"{field_conf:.0%}" if field_conf else "—")
 
-        def editor(tab, table, **kw):
-            df = base[table]
-            hide = [c for c in ("drawing_number", "source_file", "quantity_measurement", "mass_measurement") if c in df.columns]
-            out = tab.data_editor(
-                df, key=f"ed_{table}_{key}_{nonce}", width="stretch", hide_index=True,
-                column_order=[c for c in df.columns if c not in hide],
-                column_config={"confidence": conf_col, **kw.pop("column_config", {})}, **kw)
-            ss.edited.setdefault(key, {})[table] = out
-            return out
+        with st.expander("Edit title-block fields", expanded=False):
+            st.caption("Correct extracted values here. Changes are included in the exports.")
+            editor(st, "title_block", disabled=["field", "normalized", "confidence"])
 
-        with t_tb:
-            st.caption("Edit the **value** column to correct a field.")
-            editor(t_tb, "title_block", disabled=["field", "normalized", "confidence"])
-        with t_bom:
-            st.caption("Click any cell to correct it. Add / delete rows with the table toolbar. "
-                       "Clear **flags** once a ⚠ row is checked.")
-            editor(t_bom, "bom", num_rows="dynamic", disabled=["check", "confidence", "page"],
-                   column_config={"check": st.column_config.TextColumn("", width="small"),
-                                  "quantity_value": st.column_config.NumberColumn("qty (num)"),
-                                  "mass_kg": st.column_config.NumberColumn("mass kg", format="%.3f"),
-                                  "mass_verified": st.column_config.CheckboxColumn("verified")})
-        with t_spec:
-            summ = {"Material": s.get("material_callout"), "Surface finish": s.get("surface_finish"),
-                    "Heat treatment": s.get("heat_treatment"), "Standards": s.get("standards")}
-            for k_, v_ in summ.items():
-                st.markdown(f"**{k_}:** {v_ or '—'}")
-            editor(t_spec, "specs", num_rows="dynamic", disabled=["confidence", "page"])
-        with t_rev:
-            editor(t_rev, "revisions", num_rows="dynamic", disabled=["confidence", "page"])
-        with t_notes:
-            editor(t_notes, "notes", num_rows="dynamic", disabled=["confidence", "page"])
+        st.markdown("#### Extraction review")
+        if s.get("review_reasons"):
+            st.warning(s["review_reasons"])
+        else:
+            st.success("No automatic review flags were raised.")
+        st.caption(
+            "Confidence is the extractor's recorded field confidence. Always verify critical "
+            "engineering values against the original drawing."
+        )
+
+    st.divider()
+    st.subheader("Extracted data")
+    t_bom, t_spec, t_rev, t_notes = st.tabs([
+        f"BOM · {len(base['bom'])}", "Material & specs",
+        f"Revisions · {len(base['revisions'])}", f"Notes · {len(base['notes'])}",
+    ])
+    with t_bom:
+        st.caption("Review part numbers, quantities, materials and mass. Correct values before exporting.")
+        editor(
+            t_bom, "bom", num_rows="dynamic", disabled=["check", "confidence", "page"],
+            column_config={
+                "check": st.column_config.TextColumn("Review", width="small"),
+                "quantity_value": st.column_config.NumberColumn("Quantity"),
+                "mass_kg": st.column_config.NumberColumn("Mass (kg)", format="%.3f"),
+                "mass_verified": st.column_config.CheckboxColumn("Mass verified"),
+            },
+    )
+    with t_spec:
+        for label, value in (
+            ("Material", s.get("material_callout")),
+            ("Surface finish", s.get("surface_finish")),
+            ("Heat treatment", s.get("heat_treatment")),
+            ("Standards", s.get("standards")),
+        ):
+            st.markdown(f"**{label}:** {value or '—'}")
+        editor(t_spec, "specs", num_rows="dynamic", disabled=["confidence", "page"])
+    with t_rev:
+        if base["revisions"].empty:
+            st.info("No revision history entries were detected. The title-block revision, if present, is shown above.")
+        editor(t_rev, "revisions", num_rows="dynamic", disabled=["confidence", "page"])
+    with t_notes:
+        editor(t_notes, "notes", num_rows="dynamic", disabled=["confidence", "page"])
 
 
 # ======================================================================
