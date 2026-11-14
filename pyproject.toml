@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bomx"
+version = "1.1.1"
+description = "Automated BOM & material property extraction from 2D engineering drawings (DWG / DXF / PDF / scans)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pymupdf>=1.24", "opencv-python-headless>=4.8", "pytesseract>=0.3.10", "numpy>=1.24",
+  "Pillow>=10.0", "openpyxl>=3.1", "PyYAML>=6.0", "streamlit>=1.50", "pandas>=2.0",
+  "ezdxf>=1.4", "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+aspose = ["aspose-cad>=24.0"]
+
+[project.scripts]
+bomx = "bomx.cli:main"
+
+[tool.setuptools]
+packages = ["bomx"]
