@@ -1,0 +1,12 @@
+pymupdf>=1.24
+opencv-python-headless>=4.8
+pytesseract>=0.3.10
+numpy>=1.24
+Pillow>=10.0
+openpyxl>=3.1
+PyYAML>=6.0
+streamlit>=1.50
+pandas>=2.0
+ezdxf>=1.4
+matplotlib>=3.8
+# optional, commercial DWG render fallback: aspose-cad>=24.0
