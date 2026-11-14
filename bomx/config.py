@@ -116,6 +116,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+_INTERNAL_KEYS = {"_parallel", "ocr_workers"}
+
+
 def _validate_vocab(cfg: dict, key: str) -> None:
     val = cfg.get(key)
     if not isinstance(val, dict):
@@ -130,16 +133,24 @@ def _validate_vocab(cfg: dict, key: str) -> None:
                 raise ValueError(f"Invalid config '{key}' entry for '{field_name}': list items must be non-empty strings, got {item!r}.")
 
 
-def validate_config(cfg: dict) -> dict:
+def validate_config(cfg: dict, allow_internal: bool = True) -> dict:
     """Validate configuration schema, data types, vocabularies, and allowed ranges."""
     if not isinstance(cfg, dict):
         raise ValueError(f"Configuration must be a dictionary, got {type(cfg).__name__}.")
 
     # 1. Reject unknown configuration keys
     known_keys = set(DEFAULT_CONFIG.keys())
+    if allow_internal:
+        known_keys |= _INTERNAL_KEYS
     unknown = set(cfg.keys()) - known_keys
     if unknown:
         raise ValueError(f"Unknown configuration key(s): {', '.join(sorted(unknown))}")
+
+    # Internal runtime options
+    if "_parallel" in cfg and not isinstance(cfg["_parallel"], bool):
+        raise ValueError(f"Invalid internal config '_parallel': must be a boolean, got {type(cfg['_parallel']).__name__}.")
+    if "ocr_workers" in cfg and (isinstance(cfg["ocr_workers"], bool) or not isinstance(cfg["ocr_workers"], int) or cfg["ocr_workers"] < 1):
+        raise ValueError(f"Invalid internal config 'ocr_workers': must be an integer >= 1, got {cfg['ocr_workers']!r}.")
 
     # 2. Numeric ranges
     if isinstance(cfg.get("dpi"), bool) or not isinstance(cfg.get("dpi"), (int, float)) or not (50 <= cfg["dpi"] <= 1200):
@@ -202,10 +213,12 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
             user = {}
         elif not isinstance(user, dict):
             raise ValueError(f"Config file '{path}' must contain a YAML mapping/dictionary, got {type(user).__name__}.")
+        # Reject unknown/internal keys in user-provided YAML configuration
+        validate_config({**DEFAULT_CONFIG, **user}, allow_internal=False)
         _merge(cfg, user)
     if overrides:
         _merge(cfg, {k: v for k, v in overrides.items() if v is not None})
-    return validate_config(cfg)
+    return validate_config(cfg, allow_internal=True)
 
 
 def _merge(base: dict, new: dict) -> None:

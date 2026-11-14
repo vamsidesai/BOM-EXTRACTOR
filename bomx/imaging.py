@@ -362,7 +362,8 @@ def _score(ws: list[Word]) -> float:
     return sum(w.conf * sum(ch.isalnum() for ch in w.text) for w in ws)
 
 
-def ocr_numeric(clean_gray: np.ndarray, bbox, dpi: float, lang: str) -> Optional[tuple[str, float]]:
+def ocr_numeric(clean_gray: np.ndarray, bbox, dpi: float, lang: str,
+                orig_text: Optional[str] = None) -> Optional[tuple[str, float]]:
     """Re-read one cell restricted to digits and decimals (for item / qty / mass columns).
     Tests multiple image preprocessing variants (scaled, contrast-enhanced, thresholded)
     to recover faint decimal points that standard single-pass OCR easily drops."""
@@ -414,16 +415,37 @@ def ocr_numeric(clean_gray: np.ndarray, bbox, dpi: float, lang: str) -> Optional
     if not candidates:
         return None
 
-    # Compare OCR outputs:
-    # Do not blindly pick the highest-confidence integer (Tesseract often gives higher confidence
-    # to integers because dropping a dot isn't penalized).
-    # If any preprocessing variant found a valid decimal point where digits match, prefer it!
-    decimal_cands = [c for c in candidates if c[2] and re.search(r"\d+[.,]\d+", c[0])]
-    if decimal_cands:
-        decimal_cands.sort(key=lambda x: x[1], reverse=True)
-        return (decimal_cands[0][0], decimal_cands[0][1])
+    def _digits(s: str) -> str:
+        s_fixed = s.translate(str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "|": "1", "S": "5", "B": "8"}))
+        return re.sub(r"\D", "", s_fixed)
 
-    # Fallback to highest confidence candidate among non-decimals
+    orig_digits = _digits(orig_text) if orig_text else None
+    if not orig_digits and candidates:
+        # If no explicit orig_text provided, baseline digits come from untransformed base crop
+        orig_digits = _digits(candidates[0][0])
+
+    # Compare OCR outputs:
+    # Do not blindly prefer a decimal candidate unless its digits agree with the original OCR digits.
+    # A preprocessing variant producing a different number must not win simply because it contains a dot.
+    matching_decimal_cands = []
+    for c in candidates:
+        if c[2] and re.search(r"\d+[.,]\d+", c[0]):
+            c_digits = _digits(c[0])
+            if orig_digits and c_digits == orig_digits:
+                matching_decimal_cands.append(c)
+
+    if matching_decimal_cands:
+        matching_decimal_cands.sort(key=lambda x: x[1], reverse=True)
+        return (matching_decimal_cands[0][0], matching_decimal_cands[0][1])
+
+    # If no digit-matching decimal candidate exists, prefer candidates matching orig_digits
+    if orig_digits:
+        matching_cands = [c for c in candidates if _digits(c[0]) == orig_digits]
+        if matching_cands:
+            matching_cands.sort(key=lambda x: x[1], reverse=True)
+            return (matching_cands[0][0], matching_cands[0][1])
+
+    # Fallback to highest confidence candidate among all
     candidates.sort(key=lambda x: x[1], reverse=True)
     return (candidates[0][0], candidates[0][1])
 

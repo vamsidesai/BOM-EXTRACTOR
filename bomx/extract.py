@@ -649,52 +649,56 @@ def table_to_bom(t: Table, page: int, low_conf: float) -> tuple[list[BomRow], li
             if is_suspicious and clean_img is not None and mass_cell and getattr(mass_cell, "bbox", None):
                 try:
                     from .imaging import ocr_numeric
-                    got = ocr_numeric(clean_img, mass_cell.bbox, dpi=getattr(t, "dpi", 300.0), lang=getattr(t, "lang", "eng"))
+                    got = ocr_numeric(clean_img, mass_cell.bbox, dpi=getattr(t, "dpi", 300.0), lang=getattr(t, "lang", "eng"),
+                                      orig_text=raw_mass)
                     if got and got[0]:
                         num_txt, num_conf = got
+                        orig_digits = re.sub(r"\D", "", ocr_digits(raw_mass))
+                        got_digits = re.sub(r"\D", "", ocr_digits(num_txt))
                         # Compare both OCR results:
-                        # If targeted numeric pass found a decimal point (e.g. '2.10')
-                        if "." in num_txt or "," in num_txt:
+                        # Must have decimal point, good confidence, and digit agreement
+                        if ("." in num_txt or "," in num_txt) and num_conf >= 0.85 and got_digits == orig_digits:
                             norm_num = num_txt.replace(",", ".")
                             m_u = re.search(r"([A-Za-z]+)", raw_mass)
                             u_str = f" {m_u.group(1)}" if m_u else ""
                             mass_to_parse = f"{norm_num}{u_str}"
                             re_ocr_resolved = True
-                            if num_conf < 0.85:
-                                r.flags.append("mass_decimal_ambiguous")
-                        elif num_txt == re.sub(r"[^\d]", "", raw_mass):
-                            # Both OCR passes confirmed integer digits (e.g. '210')
-                            if float(num_txt) >= 20:
-                                r.flags.append("mass_decimal_ambiguous")
-                            re_ocr_resolved = True
+                        elif "." in num_txt or "," in num_txt:
+                            # Found decimal but low confidence or digit disagreement -> ambiguous candidate
+                            norm_num = num_txt.replace(",", ".")
+                            m_u = re.search(r"([A-Za-z]+)", raw_mass)
+                            u_str = f" {m_u.group(1)}" if m_u else ""
+                            mass_to_parse = f"{norm_num}{u_str}"
+                            r.flags.append("mass_decimal_ambiguous")
+                        else:
+                            # Both OCR passes confirmed integer digits or no dot found -> ambiguous
+                            r.flags.append("mass_decimal_ambiguous")
                 except Exception:
-                    pass
-
-            has_separator_fix = False
-            if is_suspicious and not re_ocr_resolved:
+                    r.flags.append("mass_decimal_ambiguous")
+            elif is_suspicious:
                 # If separator had colon or apostrophe, parse candidate with dot but flag as ambiguous
                 if re.search(r"(?<=\d)\s*[:;']\s*(?=\d)", mass_to_parse):
                     mass_to_parse = re.sub(r"(?<=\d)\s*[:;']\s*(?=\d)", ".", mass_to_parse)
-                    r.flags.append("mass_decimal_ambiguous")
-                    has_separator_fix = True
-                else:
-                    # Integer mass that is suspicious (e.g. 210 kg) without decimal
-                    r.flags.append("mass_decimal_ambiguous")
+                r.flags.append("mass_decimal_ambiguous")
 
             mass_val, mass_meas, m_flags = parse_mass_measurement(mass_to_parse, default_unit=mass_unit, conf=row_conf)
             # Crucial: preserve original OCR text in r.mass
             r.mass = raw_mass
-            if "mass_decimal_ambiguous" in r.flags and not has_separator_fix and not re_ocr_resolved:
-                # Unverified integer mass: do not accept or confirm it
+            if "mass_decimal_ambiguous" in r.flags:
+                # Ambiguity is authoritative: do not populate confirmed mass_kg or mass_measurement
                 r.mass_kg = None
                 r.mass_measurement = None
                 r.mass_verified = False
+                if mass_val is not None:
+                    r.mass_candidate = round(mass_val, 4)
+                    r.extra["mass_candidate"] = str(round(mass_val, 4))
             else:
                 if mass_meas:
                     mass_meas.raw = raw_mass
                 r.mass_kg = mass_val
                 r.mass_measurement = mass_meas
-                r.mass_verified = (mass_val is not None and "mass_decimal_ambiguous" not in r.flags)
+                r.mass_verified = (mass_val is not None)
+                r.mass_candidate = None
             r.flags.extend(m_flags)
             if mass_is_total:
                 r.extra["mass_basis"] = "total"

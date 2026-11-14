@@ -42,6 +42,8 @@ def bom_records(res: DrawingResult) -> list[dict]:
         rec["mass_nominal"] = r.mass_measurement.nominal if r.mass_measurement else None
         rec["mass_unit"] = r.mass_measurement.unit if r.mass_measurement else None
         rec["mass_kg"] = round(r.mass_kg, 4) if r.mass_kg is not None else None
+        rec["mass_verified"] = getattr(r, "mass_verified", False)
+        rec["mass_candidate"] = getattr(r, "mass_candidate", None)
         rec["quantity_measurement"] = r.quantity_measurement.to_dict() if r.quantity_measurement else None
         rec["mass_measurement"] = r.mass_measurement.to_dict() if r.mass_measurement else None
         for k in extras:
@@ -216,7 +218,7 @@ def write_xlsx(results: Iterable[DrawingResult], path: Path, statuses: dict | No
     for r in results:
         extras += [c for c in r.bom_columns if c not in BOM_STD and c not in extras]
     bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value", "quantity_unit",
-                "material", "mass", "mass_nominal", "mass_unit", "mass_kg", "remarks"] + extras + [
+                "material", "mass", "mass_nominal", "mass_unit", "mass_kg", "mass_verified", "mass_candidate", "remarks"] + extras + [
                 "confidence", "structural_confidence", "flags", "page", "source_file"]
     _sheet(wb.create_sheet("BOM"), bom, bom_cols, flag_col="flags")
     _sheet(wb.create_sheet("Title Block"), [x for r in results for x in title_records(r)],
@@ -245,6 +247,7 @@ _LOW_FILL = PatternFill("solid", fgColor="F8CBAD")
 _THIN = Side(style="thin", color="BFBFBF")
 _HEAD_NAMES = {**BOM_HEAD, "quantity_value": "Qty (numeric)", "quantity_unit": "Qty Unit",
                "mass_nominal": "Mass Nominal", "mass_unit": "Mass Unit", "mass_kg": "Mass (kg)",
+               "mass_verified": "Mass Verified", "mass_candidate": "Mass Candidate",
                "canonical_value": "Canonical Value", "canonical_unit": "Canonical Unit",
                "text_confidence": "Text Confidence", "structural_confidence": "Structural Confidence",
                "drawing_number": "Drawing Number", "drawing_title": "Drawing Title",

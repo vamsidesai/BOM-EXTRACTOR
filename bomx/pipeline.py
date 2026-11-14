@@ -172,7 +172,7 @@ def analyse_page(raw: RawPage, cfg: dict) -> PageAnalysis:
                         continue  # '4 NOS', '1.2 kg', 'A/R' - leave to the normaliser
                     if _NUMERIC.fullmatch(v.text) and v.conf >= cfg["low_conf_threshold"]:
                         continue
-                    got = imaging.ocr_numeric(clean, v.bbox, dpi, cfg["ocr_lang"])
+                    got = imaging.ocr_numeric(clean, v.bbox, dpi, cfg["ocr_lang"], orig_text=v.text)
                     if got and _NUMERIC.fullmatch(got[0]):
                         if not _NUMERIC.fullmatch(v.text) or got[1] > v.conf:
                             v.text, v.conf = got[0], max(v.conf, got[1])

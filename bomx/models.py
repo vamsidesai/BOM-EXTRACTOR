@@ -144,12 +144,17 @@ class BomRow:
     quantity_measurement: Optional[Measurement] = None
     mass_measurement: Optional[Measurement] = None
     mass_verified: bool = False
+    mass_candidate: Optional[float] = None
 
     def __post_init__(self):
-        if self.mass_kg is not None and "mass_decimal_ambiguous" not in self.flags:
-            self.mass_verified = True
-        else:
+        if "mass_decimal_ambiguous" in self.flags:
+            if self.mass_kg is not None and self.mass_candidate is None:
+                self.mass_candidate = self.mass_kg
+            self.mass_kg = None
+            self.mass_measurement = None
             self.mass_verified = False
+        elif self.mass_kg is not None:
+            self.mass_verified = True
 
         if self.quantity_measurement is None and (self.quantity_value is not None or self.quantity):
             raw = self.quantity or (str(self.quantity_value) if self.quantity_value is not None else "")

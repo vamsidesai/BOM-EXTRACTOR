@@ -100,3 +100,17 @@ def test_load_config_with_valid_yaml_and_overrides(tmp_path):
     assert cfg["dpi"] == 600
     assert cfg["date_order"] == "ymd"
 
+
+def test_load_config_parallel_cli_overrides():
+    cfg = load_config(overrides={"_parallel": True, "ocr_workers": 1})
+    assert cfg["_parallel"] is True
+    assert cfg["ocr_workers"] == 1
+
+
+def test_reject_internal_keys_in_user_yaml(tmp_path):
+    yaml_file = tmp_path / "internal.yaml"
+    yaml_file.write_text("_parallel: true\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Unknown configuration key"):
+        load_config(yaml_file)
+
+

@@ -109,10 +109,14 @@ def test_table_to_bom_suspicious_mass_flagged_and_original_text_preserved():
     # Row 1: "210 kg" is preserved as exact original OCR text, but flagged as ambiguous
     assert rows[0].mass == "210 kg"
     assert "mass_decimal_ambiguous" in rows[0].flags
+    assert rows[0].mass_kg is None
+    assert rows[0].mass_measurement is None
 
-    # Row 2: "2:10 kg" separator confusion: preserved as exact original OCR text and flagged
+    # Row 2: "2:10 kg" separator confusion: preserved as exact original OCR text and flagged as ambiguous
     assert rows[1].mass == "2:10 kg"
-    assert rows[1].mass_kg == pytest.approx(2.10)
+    assert rows[1].mass_kg is None
+    assert rows[1].mass_measurement is None
+    assert rows[1].mass_candidate == pytest.approx(2.10)
     assert "mass_decimal_ambiguous" in rows[1].flags
 
 

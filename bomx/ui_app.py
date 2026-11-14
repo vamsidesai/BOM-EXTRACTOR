@@ -147,7 +147,7 @@ def _build_xlsx(keys: list[str]) -> bytes:
         warns += [{"source_file": Path(res.source_file).name, "warning": w} for w in res.warnings]
         extraction.append((s, [r for r in bom if r.get("drawing_number") == dn]))
     bom_cols = ["drawing_number", "item", "part_number", "description", "quantity", "quantity_value", "material",
-                "mass", "mass_kg", "remarks"]
+                "mass", "mass_kg", "mass_verified", "mass_candidate", "remarks"]
     bom_cols += [c for r in bom for c in r if c not in bom_cols and c not in ("confidence", "flags", "page",
                                                                               "source_file")]
     bom_cols = list(dict.fromkeys(bom_cols)) + ["confidence", "flags", "page", "source_file"]
@@ -472,7 +472,8 @@ if res is not None:
             editor(t_bom, "bom", num_rows="dynamic", disabled=["check", "confidence", "page"],
                    column_config={"check": st.column_config.TextColumn("", width="small"),
                                   "quantity_value": st.column_config.NumberColumn("qty (num)"),
-                                  "mass_kg": st.column_config.NumberColumn("mass kg", format="%.3f")})
+                                  "mass_kg": st.column_config.NumberColumn("mass kg", format="%.3f"),
+                                  "mass_verified": st.column_config.CheckboxColumn("verified")})
         with t_spec:
             summ = {"Material": s.get("material_callout"), "Surface finish": s.get("surface_finish"),
                     "Heat treatment": s.get("heat_treatment"), "Standards": s.get("standards")}
