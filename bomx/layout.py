@@ -845,16 +845,19 @@ def title_block_cells(groups: list[list[Cell]], used: set[int],
     picked: list[Cell] = []
     scored = []
     for g in groups:
-        # Check that the group is not already claimed by a BOM or revision table
-        if any(c.id in used for c in g):
+        rem = [c for c in g if c.id not in used]
+        if not rem:
+            continue
+        # Discard groups largely claimed by a detected table (e.g. BOM)
+        if len(rem) < 0.5 * len(g) and len(g) >= 4:
             continue
         flds = set()
-        for c in g:
+        for c in rem:
             if c.words:
                 f, _, _ = match_label_prefix(c.text, title_vocab)
                 if f:
                     flds.add(f)
-        scored.append((len(flds), g, flds))
+        scored.append((len(flds), rem, flds))
 
     # Primary selection: groups with >= 2 fields including a key title field
     for n, rem, flds in sorted(scored, key=lambda x: -x[0]):
@@ -900,6 +903,34 @@ def title_block_cells(groups: list[list[Cell]], used: set[int],
                     tb_w = max(tb_box[2] - tb_box[0], 10.0)
                     max_dist_x = max(tb_w * 0.75, 400.0)
                     max_dist_y = max(tb_h * 1.5, 400.0)
+
+        # Preserve neighbouring value cells (e.g. separate value cell to the right or below a title label like REV)
+        for p in list(picked):
+            if not p.words:
+                continue
+            p_fld, _, _ = match_label_prefix(p.text, title_vocab)
+            if not p_fld:
+                continue
+            for _, rem, _ in scored:
+                for c in rem:
+                    if c.id in picked_ids or not c.words:
+                        continue
+                    h_gap = c.x0 - p.x1
+                    v_gap = c.y0 - p.y1
+                    r_match = (0 <= h_gap <= max_dist_x * 0.25 and (min(p.y1, c.y1) - max(p.y0, c.y0) > 0.2 * min(p.h, c.h) or abs((p.y0 + p.y1) - (c.y0 + c.y1)) <= max(p.h, c.h)))
+                    b_match = (0 <= v_gap <= max_dist_y * 0.25 and (min(p.x1, c.x1) - max(p.x0, c.x0) > 0.2 * min(p.w, c.w) or abs((p.x0 + p.x1) - (c.x0 + c.x1)) <= max(p.w, c.w)))
+                    if r_match or b_match:
+                        picked.append(c)
+                        picked_ids.add(c.id)
+
+        # Include unlabelled cells sitting strictly inside the title block bounding box
+        for _, rem, _ in scored:
+            for c in rem:
+                if c.id not in picked_ids and c.words:
+                    if (tb_box[0] - 5 <= c.x0 and c.x1 <= tb_box[2] + 5 and
+                            tb_box[1] - 5 <= c.y0 and c.y1 <= tb_box[3] + 5):
+                        picked.append(c)
+                        picked_ids.add(c.id)
     return picked
 
 
@@ -925,7 +956,7 @@ def text_title_cells(words: list[Word], vocab: dict[str, list[str]], dpi: float,
         rest = rest.strip()
         if f in _TB_KEY and re.fullmatch(r"[/&+]\s*[A-Z .]{2,12}:?", rest, re.I):
             rest = ""  # combined label such as 'DRAWN BY / DATE:' - value below
-        if f in _TB_KEY and (label.rstrip().endswith(":") or not rest or f in ("scale", "sheet")):
+        if f in _TB_KEY and (label.rstrip().endswith(":") or not rest or f in ("scale", "sheet", "revision", "size")):
             lab.append((sg, f, rest))
     if len(lab) < min_fields:
         return []

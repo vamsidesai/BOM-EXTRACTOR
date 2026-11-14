@@ -250,3 +250,184 @@ def test_legacy_gearbox_drawing_exact():
     assert not res.summary["review_required"]
     assert [n["text"] for n in res.notes][-2:] == ["UNLESS OTHERWISE SPECIFIED, DIMENSIONS ARE IN MM",
                                                    "REMOVE ALL BURRS AND SHARP EDGES"]
+
+
+# ------------------------------------------------------------------ regression tests
+
+def test_title_block_with_rev_drawn_by_date_not_detected_as_revision_table():
+    """Case 1: A title block with REV, DRAWN BY, and DATE must not be detected as a revision table."""
+    from bomx.layout import _is_header
+    # REV, DATE, and DRAWN BY (which maps to approved)
+    flds = {"rev", "date", "approved"}
+    assert not _is_header(flds, "revision")
+    # Even when combined with scale and sheet
+    assert not _is_header({"rev", "date", "approved", "scale", "sheet"}, "revision")
+
+
+def test_revision_row_without_identifier_discarded():
+    """Case 2: A revision row with an empty rev and only approved populated must be discarded."""
+    from bomx.extract import table_to_revisions
+    from bomx.layout import Column, Table, TableCellValue
+
+    col_rev = Column(header="REV", key="rev", x0=0, x1=50)
+    col_app = Column(header="APPROVED", key="approved", x0=50, x1=200)
+    t = Table(
+        kind="revision",
+        columns=[col_rev, col_app],
+        rows=[
+            {
+                "rev": TableCellValue(text="", conf=0.9),
+                "approved": TableCellValue(text="J. DOE / 2024-08-15", conf=0.95),
+            }
+        ],
+        row_bboxes=[(0, 20, 200, 40)],
+        bbox=(0, 0, 200, 40),
+        header_bbox=(0, 0, 200, 20),
+    )
+    rows = table_to_revisions(t, page=1, date_order="dmy")
+    assert len(rows) == 0
+
+
+def test_genuine_revision_row_extracted():
+    """Case 3: A genuine revision row with rev, description, and date must still be extracted."""
+    from bomx.layout import _is_header, Column, Table, TableCellValue
+    from bomx.extract import table_to_revisions
+
+    assert _is_header({"rev", "description", "date"}, "revision")
+    assert _is_header({"rev", "ecn", "date"}, "revision")
+
+    col_rev = Column(header="REV", key="rev", x0=0, x1=40)
+    col_desc = Column(header="DESCRIPTION", key="description", x0=40, x1=200)
+    col_date = Column(header="DATE", key="date", x0=200, x1=300)
+    col_app = Column(header="APPROVED", key="approved", x0=300, x1=400)
+    t = Table(
+        kind="revision",
+        columns=[col_rev, col_desc, col_date, col_app],
+        rows=[
+            {
+                "rev": TableCellValue(text="1", conf=0.95),
+                "description": TableCellValue(text="INITIAL RELEASE", conf=0.95),
+                "date": TableCellValue(text="15/08/2024", conf=0.95),
+                "approved": TableCellValue(text="R. KUMAR", conf=0.95),
+            }
+        ],
+        row_bboxes=[(0, 20, 400, 40)],
+        bbox=(0, 0, 400, 40),
+        header_bbox=(0, 0, 400, 20),
+    )
+    rows = table_to_revisions(t, page=1, date_order="dmy")
+    assert len(rows) == 1
+    assert rows[0].rev == "1"
+    assert rows[0].description == "INITIAL RELEASE"
+    assert rows[0].date == "15/08/2024"
+    assert rows[0].extra.get("date_iso") == "2024-08-15"
+    assert rows[0].approved == "R. KUMAR"
+
+
+def test_combined_drawn_by_date_field_populates_author_and_date():
+    """Case 4: A combined DRAWN BY / DATE field must populate both author and date."""
+    from bomx.extract import parse_title_block
+    from bomx.models import Cell, Word
+    from bomx.config import DEFAULT_CONFIG
+
+    words = [
+        Word("DRAWN", 0, 0, 40, 15, 0.95),
+        Word("BY", 42, 0, 60, 15, 0.95),
+        Word("/", 62, 0, 68, 15, 0.95),
+        Word("DATE:", 70, 0, 100, 15, 0.95),
+        Word("J.", 105, 0, 115, 15, 0.95),
+        Word("DOE", 118, 0, 140, 15, 0.95),
+        Word("/", 142, 0, 148, 15, 0.95),
+        Word("2024-08-15", 150, 0, 220, 15, 0.95),
+    ]
+    cell = Cell(0, 0, 220, 15, words=words, id=1)
+    tb = parse_title_block([cell], DEFAULT_CONFIG["title_labels"], 300.0, "")
+    assert tb.get("drawn_by") is not None
+    assert tb["drawn_by"].value == "J. DOE"
+    assert tb.get("date") is not None
+    assert tb["date"].value == "2024-08-15" or tb["date"].normalized == "2024-08-15"
+
+
+def test_reduction_gearbox_screenshot_regression_fixture():
+    """Regression fixture matching the screenshot's drawing:
+    drawing_number: DWG-2026-8895-R2
+    drawing_title: REDUCTION GEARBOX SHAFT ASSEMBLY
+    revision: 1
+    drawn_by: J. DOE
+    date: 2024-08-15
+    revisions: No author/date-only row
+    """
+    from bomx.extract import parse_title_block, table_to_revisions
+    from bomx.layout import Column, Table, TableCellValue, title_block_cells
+    from bomx.models import Cell, Word
+    from bomx.config import DEFAULT_CONFIG
+
+    c_title = Cell(300, 500, 600, 530, words=[
+        Word("REDUCTION", 305, 505, 380, 525, 0.95),
+        Word("GEARBOX", 385, 505, 460, 525, 0.95),
+        Word("SHAFT", 465, 505, 520, 525, 0.95),
+        Word("ASSEMBLY", 525, 505, 595, 525, 0.95),
+    ], id=1)
+    c_dwg = Cell(300, 530, 520, 560, words=[
+        Word("DRAWING", 305, 535, 360, 555, 0.95),
+        Word("NO:", 365, 535, 385, 555, 0.95),
+        Word("DWG-2026-8895-R2", 390, 535, 515, 555, 0.95),
+    ], id=2)
+    c_rev = Cell(520, 530, 600, 560, words=[
+        Word("REV:", 525, 535, 555, 555, 0.95),
+        Word("1", 565, 535, 580, 555, 0.95),
+    ], id=3)
+    c_drawn = Cell(300, 560, 480, 580, words=[
+        Word("DRAWN", 305, 565, 340, 575, 0.95),
+        Word("BY", 342, 565, 355, 575, 0.95),
+        Word("/", 357, 565, 362, 575, 0.95),
+        Word("DATE:", 364, 565, 395, 575, 0.95),
+        Word("J.", 398, 565, 408, 575, 0.95),
+        Word("DOE", 410, 565, 430, 575, 0.95),
+        Word("/", 432, 565, 437, 575, 0.95),
+        Word("2024-08-15", 440, 565, 478, 575, 0.95),
+    ], id=4)
+    c_scale = Cell(480, 560, 540, 580, words=[
+        Word("SCALE:", 485, 565, 520, 575, 0.95),
+        Word("1:1", 522, 565, 538, 575, 0.95),
+    ], id=5)
+    c_sheet = Cell(540, 560, 600, 580, words=[
+        Word("SHEET:", 545, 565, 575, 575, 0.95),
+        Word("1", 578, 565, 583, 575, 0.95),
+        Word("OF", 585, 565, 592, 575, 0.95),
+        Word("1", 594, 565, 598, 575, 0.95),
+    ], id=6)
+
+    tb_group = [c_title, c_dwg, c_rev, c_drawn, c_scale, c_sheet]
+    selected_cells = title_block_cells([tb_group], used=set(), title_vocab=DEFAULT_CONFIG["title_labels"])
+    assert len(selected_cells) == len(tb_group)
+
+    tb = parse_title_block(selected_cells, DEFAULT_CONFIG["title_labels"], 300.0, "")
+    assert tb.get("drawing_number") is not None
+    assert tb["drawing_number"].value == "DWG-2026-8895-R2"
+    assert tb.get("drawing_title") is not None
+    assert tb["drawing_title"].value == "REDUCTION GEARBOX SHAFT ASSEMBLY"
+    assert tb.get("revision") is not None
+    assert tb["revision"].value == "1"
+    assert tb["revision"].normalized == "1"  # explicitly 1, not R2
+    assert tb.get("drawn_by") is not None
+    assert tb["drawn_by"].value == "J. DOE"
+    assert tb.get("date") is not None
+    assert tb["date"].value == "2024-08-15" or tb["date"].normalized == "2024-08-15"
+
+    rev_cols = [
+        Column(header="DRAWN BY / DATE", key="approved", x0=300, x1=480),
+        Column(header="SCALE", key="scale", x0=480, x1=540),
+        Column(header="SHEET", key="sheet", x0=540, x1=600),
+    ]
+    rev_table = Table(
+        kind="revision",
+        columns=rev_cols,
+        rows=[{"approved": TableCellValue("J. DOE / 2024-08-15", 0.95)}],
+        row_bboxes=[(300, 560, 600, 580)],
+        bbox=(300, 560, 600, 580),
+        header_bbox=(300, 560, 600, 570),
+    )
+    revs = table_to_revisions(rev_table, page=1, date_order="dmy")
+    assert len(revs) == 0  # No author/date-only row in revisions
+

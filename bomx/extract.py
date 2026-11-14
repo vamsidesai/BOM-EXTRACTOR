@@ -141,8 +141,8 @@ def _spatial_neighbour(c: Cell, cells: list[Cell], label_ids: set[int], tol: flo
     - Vertical overlap or center alignment for right neighbours; horizontal overlap or center alignment below
     - Value satisfies _valid(field, val)
     """
-    max_h_tol = max(tol * 4.5, 30.0)
-    overlap_tol = max(tol, 5.0)
+    max_h_tol = max(tol * 8.0, 150.0)
+    overlap_tol = max(tol * 2.0, 20.0)
     c_mid_y = (c.y0 + c.y1) / 2.0
 
     # 1. Look right: closest value cell to the right with vertical overlap/alignment
@@ -154,7 +154,7 @@ def _spatial_neighbour(c: Cell, cells: list[Cell], label_ids: set[int], tol: flo
         if -overlap_tol <= h_gap <= max_h_tol:
             ov = min(c.y1, o.y1) - max(c.y0, o.y0)
             v_shift = abs(c_mid_y - (o.y0 + o.y1) / 2.0)
-            if ov > 0.15 * min(c.h, o.h) or v_shift <= max(c.h, o.h) * 0.85:
+            if ov > 0.15 * min(c.h, o.h) or v_shift <= max(c.h, o.h) * 1.5:
                 txt = clean_value(o.text)
                 if not txt:
                     continue
@@ -168,7 +168,7 @@ def _spatial_neighbour(c: Cell, cells: list[Cell], label_ids: set[int], tol: flo
         return best_right
 
     # 2. Look below: closest value cell below with horizontal overlap/alignment
-    max_v_tol = max(tol * 3.5, 25.0)
+    max_v_tol = max(tol * 6.0, 100.0)
     c_mid_x = (c.x0 + c.x1) / 2.0
     best_below, best_below_score = None, float("inf")
     for o in cells:
@@ -178,7 +178,7 @@ def _spatial_neighbour(c: Cell, cells: list[Cell], label_ids: set[int], tol: flo
         if -overlap_tol <= v_gap <= max_v_tol:
             ov = min(c.x1, o.x1) - max(c.x0, o.x0)
             h_shift = abs(c_mid_x - (o.x0 + o.x1) / 2.0)
-            if ov > 0.15 * min(c.w, o.w) or h_shift <= max(c.w, o.w) * 0.85:
+            if ov > 0.15 * min(c.w, o.w) or h_shift <= max(c.w, o.w) * 1.5:
                 txt = clean_value(o.text)
                 if not txt:
                     continue
@@ -260,8 +260,6 @@ def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str
                     key = pf.replace("_by", "_date")
                     out.setdefault(key, FieldValue(clean_value(n.text), round(n.conf, 3), n.bbox,
                                                    raw=n.text))
-                    out.setdefault(key, FieldValue(clean_value(n.text), round(n.conf, 3), n.bbox,
-                                                   raw=n.text))
 
     # no labelled title: the largest unlabelled lettering in the block is the title
     if "drawing_title" not in out:
@@ -284,7 +282,7 @@ def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str
                                               raw=best.text)
 
     # resolve the generic DATE: drawn date > date label nearest DRAWN > first
-    if "drawn_date" in out:
+    if "drawn_date" in out and "date" not in out:
         out["date"] = out["drawn_date"]
     elif len(cands.get("date", [])) > 1 and "drawn_by" in out:
         db = out["drawn_by"].bbox
@@ -294,10 +292,16 @@ def parse_title_block(cells: list[Cell], vocab: dict, dpi: float, page_text: str
             out["date"] = best[0]
 
     # ---- fallbacks from free page text
-    if "drawing_number" not in out:
+    if "drawing_number" not in out and page_text:
         m = _DWG_RX.search(page_text)
         if m:
             out["drawing_number"] = FieldValue(m.group(1), 0.6, None, raw=m.group(0))
+    if "revision" not in out and page_text:
+        m = _REV_RX.search(page_text)
+        if m:
+            val = m.group(1).strip()
+            if _valid("revision", val):
+                out["revision"] = FieldValue(val, 0.6, None, raw=m.group(0), normalized=val)
     if "projection" not in out or not _PROJ_RX.search(out["projection"].value or ""):
         m = _PROJ_RX.search(page_text)
         if m:
@@ -343,15 +347,15 @@ def _valid(f: str, v: Optional[str]) -> bool:
     if f == "drawing_number":
         return bool(re.search(r"\d", v)) and len(v) <= 40
     if f == "revision":
-        v_clean = v.strip()
-        if len(v_clean) > 8 or "\n" in v_clean:
+        v_clean = re.sub(r"\s+", " ", v).strip()
+        if len(v_clean) > 25:
             return False
         if re.fullmatch(r"REV(?:ISION)?\.?", v_clean, re.I):
             return False
         if re.search(r"\b(?:NOTE|GENERAL|SHEET|TOLERANCE|UNLESS|ZONE|TITLE)\b", v_clean, re.I):
             return False
         v_val = re.sub(r"^REV(?:ISION)?\.?\s*[:#]?\s*", "", v_clean, flags=re.I).strip()
-        if not v_val or bool(re.search(r"[^A-Za-z0-9\-./]", v_val)):
+        if not v_val or len(v_val) > 8 or bool(re.search(r"[^A-Za-z0-9\-./]", v_val)):
             return False
         return True
     if f in ("date",) or f.endswith("_date"):
