@@ -1,0 +1,67 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "bomx: open UI (browser)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "bomx",
+      "args": [
+        "ui"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "bomx: extract sample drawings",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "bomx",
+      "args": [
+        "extract",
+        "samples",
+        "-o",
+        "results",
+        "-w",
+        "2"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "bomx: extract MY drawings folder",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "bomx",
+      "args": [
+        "extract",
+        "${input:drawingsFolder}",
+        "-o",
+        "results_mine",
+        "-w",
+        "4"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "bomx: check setup",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "bomx",
+      "args": [
+        "check"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "drawingsFolder",
+      "type": "promptString",
+      "description": "Full path of the folder (or file) with your drawings",
+      "default": "C:\\Drawings"
+    }
+  ]
+}
